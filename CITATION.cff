@@ -1,0 +1,49 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below. If you use the data, please cite the data set too."
+title: "burn2scar: code that builds the burn2scar data set"
+version: "3.0"
+license: Apache-2.0
+repository-code: "https://github.com/paramkaur10/burn2scar_dataset_creation"
+keywords:
+  - burned area
+  - burn scar
+  - Sentinel-2
+  - EFFIS
+  - semantic segmentation
+authors:
+  - family-names: Thind
+    given-names: Parampuneet Kaur
+    affiliation: "European Space Agency, ESRIN; Sapienza University of Rome; University School for Advanced Studies IUSS Pavia"
+  - family-names: Cadau
+    given-names: Enrico
+    affiliation: "European Space Agency, ESRIN"
+  - family-names: Del Prete
+    given-names: Roberto
+    affiliation: "European Space Agency, ESRIN"
+  - family-names: Ricolfi
+    given-names: Silvia
+    affiliation: "European Space Agency, ESRIN; Sapienza University of Rome"
+  - family-names: Meoni
+    given-names: Gabriele
+    affiliation: "European Space Agency, ESRIN"
+  - family-names: Taramelli
+    given-names: Andrea
+    affiliation: "European Space Agency, ESRIN; University School for Advanced Studies IUSS Pavia; Italian Institute for Environmental Protection and Research (ISPRA)"
+references:
+  - type: dataset
+    title: "burn2scar: a Sentinel-2 burn-scar segmentation data set"
+    version: "3.0"
+    doi: 10.5281/zenodo.23986827
+    authors:
+      - family-names: Thind
+        given-names: Parampuneet Kaur
+      - family-names: Cadau
+        given-names: Enrico
+      - family-names: Del Prete
+        given-names: Roberto
+      - family-names: Ricolfi
+        given-names: Silvia
+      - family-names: Meoni
+        given-names: Gabriele
+      - family-names: Taramelli
+        given-names: Andrea

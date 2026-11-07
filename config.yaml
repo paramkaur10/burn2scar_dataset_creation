@@ -1,4 +1,5 @@
 effis_path: effis/5fbf994ef5774ab882bf7239ec8b32f5.zip
+effis_extra: []
 countries: [IT, FR, ES, EL]
 start_date: "2020-01-01"
 end_date: "2026-08-04"
@@ -26,7 +27,7 @@ total_budget_gb: 40
 country_quota: {IT: 0.60, FR: 0.1333, ES: 0.1333, EL: 0.1333}
 min_free_gb: 2    # streaming architecture — each fire only needs a few MB locally, not GB
 workers: 2    # batch uploader already handles rate-limiting independently
-ocm_device: "gpu"    # force CPU inference — GPUs reserved for other work
+ocm_device: "gpu"    # run_extraction.py assigns cuda:0 or cuda:1 to each worker
 hf_repo_id: "neet1797/burn2scar"
 out_dir: "./output"
 cache_folder: "./temp_data"

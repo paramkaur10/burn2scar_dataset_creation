@@ -7,6 +7,8 @@ import numpy as np
 import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds
+from rasterio.warp import transform_bounds
+from shapely.geometry import box
 
 from eolearn.core import EOTask, FeatureType
 from sentinelhub import BBox, DataCollection, SentinelHubCatalog, SHConfig
@@ -17,6 +19,7 @@ log = logging.getLogger(__name__)
 
 MASK_CLEAR, MASK_FRESH, MASK_OLD = 0, 2, 3
 MASK_CLOUD, MASK_SHADOW, MASK_WATER, MASK_NODATA = 4, 5, 6, 255
+MASK_OLDER = 7  # burned more than burn_max_age_days before the scene
 MASK_COLORMAP = {
     0:   (200, 200, 200, 255),
     2:   (220,  60,  20, 255),
@@ -24,6 +27,7 @@ MASK_COLORMAP = {
     4:   (255, 255, 255, 255),
     5:   ( 60,  60,  90, 255),
     6:   ( 30,  90, 200, 255),
+    7:   (120,  95,  70, 255),
     255: (  0,   0,   0,   0),
 }
 
@@ -127,7 +131,11 @@ class BurnScarRasterTask(EOTask):
         t, h, w = eopatch[self.ref].shape[:3]
         bbox = eopatch.bbox
         transform = from_bounds(bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y, w, h)
-        fires_utm = self.fires.to_crs(bbox.crs.pyproj_crs())
+        # Only perimeters near the tile, so the whole export isn't reprojected for every tile.
+        footprint = box(*transform_bounds(bbox.crs.pyproj_crs(), self.fires.crs, bbox.min_x, bbox.min_y,
+                                          bbox.max_x, bbox.max_y, densify_pts=21))
+        nearby = self.fires.iloc[self.fires.sindex.query(footprint, predicate="intersects")]
+        fires_utm = nearby.to_crs(bbox.crs.pyproj_crs())
         burn = np.zeros((t, h, w, 1), np.uint8)
         for ti, ts in enumerate(eopatch.timestamp):
             ts64 = np.datetime64(ts)
@@ -163,6 +171,9 @@ class CombineMaskTask(EOTask):
         labels[shadow] = MASK_SHADOW
         labels[cloud]  = MASK_CLOUD
         labels[~valid] = MASK_NODATA
+        if "BURN_OLDER" in m:
+            # Only ever replaces clear, so it never hides water or a recent burn.
+            labels[m["BURN_OLDER"][..., 0].astype(bool) & (labels == MASK_CLEAR)] = MASK_OLDER
         eopatch[(FeatureType.MASK, "LABELS")] = labels[..., np.newaxis]
         return eopatch
 
@@ -295,11 +306,14 @@ def _find_best_scene(bbox, fire_row, fires_gdf, cfg, sh, day_min, day_max, windo
     return accepted_eop, accepted_date
 
 
-def process_fire(fire_row, fires_gdf, cfg, sh):
+def process_fire(fire_row, fires_gdf, perimeters, cfg, sh):
     """For each fire, acquires a 'fresh' scene (post_fire_min/max_days window) and,
     if enabled, a second 'old' scene (old_scene_min/max_days window) so old_burn
     can appear for the fire the tile is actually centered on, not just from
-    incidental overlap with other fires."""
+    incidental overlap with other fires.
+
+    fires_gdf is the selected fires and only affects which scene is chosen.
+    perimeters is every EFFIS perimeter, and is what the burn classes come from."""
     fire_id = fire_row["fire_id"]
     centroid = fire_row.geometry.centroid
     bbox = get_utm_bbox(centroid.y, centroid.x, cfg["bbox_size_m"])
@@ -318,13 +332,16 @@ def process_fire(fire_row, fires_gdf, cfg, sh):
         log.info("[%s] fire %s (%.0f ha) -> %s-window S2 date %s accepted", fire_id,
                  fire_row["fire_date"].date(), fire_row.get("area_ha", np.nan), label, date)
 
-        eop = BurnScarRasterTask(fires_gdf, (FeatureType.DATA, "BANDS"),
+        eop = BurnScarRasterTask(perimeters, (FeatureType.DATA, "BANDS"),
                                  output_feature=(FeatureType.MASK, "BURN_FRESH"),
                                  min_age_days=-1, max_age_days=cfg["fresh_burn_max_days"])(eop)
-        eop = BurnScarRasterTask(fires_gdf, (FeatureType.DATA, "BANDS"),
+        eop = BurnScarRasterTask(perimeters, (FeatureType.DATA, "BANDS"),
                                  output_feature=(FeatureType.MASK, "BURN_OLD"),
                                  min_age_days=cfg["fresh_burn_max_days"],
                                  max_age_days=cfg["burn_max_age_days"])(eop)
+        eop = BurnScarRasterTask(perimeters, (FeatureType.DATA, "BANDS"),
+                                 output_feature=(FeatureType.MASK, "BURN_OLDER"),
+                                 min_age_days=cfg["burn_max_age_days"], max_age_days=np.inf)(eop)
         eop = CombineMaskTask(include_cirrus=cfg["include_scl_cirrus_as_cloud"])(eop)
 
         files = export_products(eop, cfg["out_dir"], fire_id)

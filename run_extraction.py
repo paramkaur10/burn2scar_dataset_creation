@@ -12,7 +12,7 @@ import pandas as pd
 import yaml
 from dotenv import load_dotenv
 
-from src.effis_loader import load_effis
+from src.effis_loader import load_all_perimeters, load_effis
 from src.s2_pipeline import make_sh_config, process_fire
 from src.hf_upload import init_hf, load_quota_state, save_quota_state, upload_and_cleanup
 
@@ -45,10 +45,13 @@ def main():
     southern_ok = ~is_fr | (fires_all.geometry.centroid.y <= cfg["southern_france_max_lat"])
     fires = fires_all[southern_ok].reset_index(drop=True)
     log.info("%d fires queued after filtering", len(fires))
+    # The filters above choose which fires get tiles. Labels use every perimeter.
+    perimeters = load_all_perimeters(cfg["effis_path"], cfg.get("effis_extra"))
+    log.info("%d perimeters available for labels", len(perimeters))
 
     if args.smoke_test:
         row = fires.iloc[0]
-        files = process_fire(row, fires, cfg, sh)
+        files = process_fire(row, fires, perimeters, cfg, sh)
         if not files:
             log.error("smoke test produced no files"); return
         fire_dir = os.path.dirname(os.path.dirname(files[0]))
@@ -116,7 +119,7 @@ def main():
         run_cfg = copy.deepcopy(cfg)
         run_cfg["ocm_device"] = next(device_cycle)
         try:
-            files = process_fire(fire_row, fires, run_cfg, sh)
+            files = process_fire(fire_row, fires, perimeters, run_cfg, sh)
             if not files:
                 return "skipped", 0
             # NOTE: no per-fire upload here anymore — a separate batch uploader

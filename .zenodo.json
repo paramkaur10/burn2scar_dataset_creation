@@ -1,0 +1,18 @@
+{
+  "title": "burn2scar: code that builds the burn2scar data set",
+  "upload_type": "software",
+  "description": "Code that builds the burn2scar data set of Sentinel-2 Level-1C tiles and burn-scar segmentation masks for EFFIS fires in Italy, Spain, France and Greece (https://doi.org/10.5281/zenodo.23986827): fire selection from EFFIS, scene search and download through Sentinel Hub, cloud and shadow masks with OmniCloudMask, burn labels, the index and splits, the label review, the baselines and the release.",
+  "creators": [
+    {"name": "Thind, Parampuneet Kaur", "affiliation": "European Space Agency, ESRIN; Sapienza University of Rome; University School for Advanced Studies IUSS Pavia"},
+    {"name": "Cadau, Enrico", "affiliation": "European Space Agency, ESRIN"},
+    {"name": "Del Prete, Roberto", "affiliation": "European Space Agency, ESRIN"},
+    {"name": "Ricolfi, Silvia", "affiliation": "European Space Agency, ESRIN; Sapienza University of Rome"},
+    {"name": "Meoni, Gabriele", "affiliation": "European Space Agency, ESRIN"},
+    {"name": "Taramelli, Andrea", "affiliation": "European Space Agency, ESRIN; University School for Advanced Studies IUSS Pavia; Italian Institute for Environmental Protection and Research (ISPRA)"}
+  ],
+  "license": "apache-2.0",
+  "keywords": ["burned area", "burn scar", "Sentinel-2", "EFFIS", "semantic segmentation"],
+  "related_identifiers": [
+    {"identifier": "10.5281/zenodo.23986827", "relation": "isSupplementTo", "resource_type": "dataset", "scheme": "doi"}
+  ]
+}

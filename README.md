@@ -1,8 +1,9 @@
 # burn2scar
 
 A Sentinel-2 burn-scar segmentation dataset built from real, unsimulated satellite
-imagery paired with EFFIS-derived labels — the pipeline behind
-[huggingface.co/datasets/neet1797/burn2scar](https://huggingface.co/datasets/neet1797/burn2scar).
+imagery paired with EFFIS-derived labels. This repository holds the code that made it.
+The dataset itself is on Zenodo, [doi.org/10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827),
+with a mirror at [huggingface.co/datasets/neet1797/burn2scar](https://huggingface.co/datasets/neet1797/burn2scar).
 
 ---
 
@@ -11,8 +12,8 @@ imagery paired with EFFIS-derived labels — the pipeline behind
 For each wildfire in the EFFIS (European Forest Fire Information System) record,
 this pipeline finds the best available Sentinel-2 scene and produces:
 
-- A **13-band Sentinel-2 L1C image** (top-of-atmosphere reflectance, native 10 m resolution)
-- A **7-class segmentation mask** at the same resolution and extent
+- A **13-band Sentinel-2 L1C image** (top-of-atmosphere reflectance, all bands on a 10 m grid)
+- A **segmentation mask** with seven classes plus no data, at the same resolution and extent
 
 No sensor simulation is applied. Bands are Sentinel-2's own native radiometry,
 resampled to a common 10 m grid (unavoidable, since S2's 13 bands natively span
@@ -26,16 +27,19 @@ correction, denoising, or synthetic degradation of any kind is applied.
 | Mask value | Class | Definition |
 |---|---|---|
 | 0 | clear | No burn, cloud, shadow, or water detected |
-| 2 | fresh burn | Burned area, ≤ 90 days since ignition |
-| 3 | old burn | Burned area, > 90 days since ignition (up to 365 days) |
+| 2 | fresh burn | Burned area, ≤ 90 days since the EFFIS fire date |
+| 3 | old burn | Burned area, > 90 days since the EFFIS fire date (up to 365 days) |
+| 7 | older burn | Burned area, > 365 days since the EFFIS fire date; only where the pixel would otherwise be clear |
 | 4 | cloud | Detected via [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask) |
 | 5 | cloud shadow | Detected via OmniCloudMask |
-| 6 | water | NDWI > 0.05, or Sentinel-2 Scene Classification (SCL) value 6 |
+| 6 | water | NDWI > 0.05, or Sentinel-2 Scene Classification (SCL) value 6; in November to February scenes, kept only where the fire's March to October scene agrees |
 | 255 | nodata | Outside the valid data mask (tile edge / sensor gap) |
 
-Fresh and old burn come from the same EFFIS fire-perimeter polygons, distinguished
-purely by the number of days between the fire's recorded ignition date and the
-satellite acquisition date.
+The burn classes come from every EFFIS fire-perimeter polygon that touches the tile,
+distinguished purely by the number of days between the fire's recorded date and the
+satellite acquisition date. Version 1 on Hugging Face had no older burn class and took
+burn only from the selected fires; `tools/burn_labels.py` and `tools/fix_winter_water.py`
+turn version 1 masks into the version 3.0 masks on Zenodo.
 
 ---
 
@@ -50,11 +54,11 @@ separate class for them. If your application needs a purer vegetation mask,
 combine this dataset with a land-cover product (e.g. ESA WorldCover) and filter
 `clear` further based on your own criteria.
 
-Burn labels themselves are only as complete as EFFIS's own detection. EFFIS's
-documented minimum mapping unit for burnt-area products is **10 hectares** —
-fires smaller than that are not labeled by EFFIS at all, and so appear as
-`clear` in this dataset rather than `fresh_burn`/`old_burn`, even where a real
-(sub-threshold) fire occurred.
+Burn labels themselves are only as complete as EFFIS's own mapping. EFFIS states
+no single minimum mapping unit: it maps fires of about 30 ha or larger from MODIS
+and, since 2018, smaller fires as well from Sentinel-2. Fires EFFIS missed appear
+as `clear` in this dataset. EFFIS dates may also differ from the actual ignition
+date, which matters most near the 90-day line between `fresh_burn` and `old_burn`.
 
 ---
 
@@ -66,9 +70,10 @@ separate time windows:
 - **Fresh window**: 5–60 days after the fire's ignition date
 - **Old window**: 120–300 days after ignition
 
-Both windows are searched independently for the least-cloudy available scene where
-the fire's own burn scar is not significantly obscured by cloud or shadow (≤ 50% of
-the scar's pixels). This means most tile pairs will show a fresh_burn-dominant mask
+Both windows are searched independently, starting from the least cloudy scene, for one
+where burned pixels in the tile are at most 50% obscured by cloud or shadow. If no
+candidate passes, the least obscured one is kept. The index marks tiles where the
+fire's own scar is over that limit (`scene_rule_pass`). This means most tile pairs will show a fresh_burn-dominant mask
 (early acquisition) and a separate old_burn-dominant mask (later acquisition) for
 the same underlying fire — not necessarily both classes within a single image.
 
@@ -91,10 +96,10 @@ Fires are drawn from an EFFIS export, filtered by:
 | Minimum area | 5 hectares (excludes marginal / low-confidence micro-detections) |
 | Maximum area | 2,000 hectares (excludes mega-fires large enough to make a single tile 100% burn scar, with no useful boundary signal) |
 
-**19,443 fires** queued after filtering; **13,903 fires** yielded at least one
-usable, sufficiently cloud-free acquisition (the remainder had no candidate scene
-passing the cloud/obscuration threshold in either window) — producing
-**26,854 scene/mask pairs** and **30.57 GB** total.
+**19,443 fires** queued after filtering. Fires ran from the largest down, each country
+within its share of the budget, so in Spain and France the smallest fires weren't reached.
+The released dataset has **13,895 fires** and **26,846 scene/mask pairs**, about 31 GB.
+(Eight tiles from an early run have no split and are left out of the release.)
 
 ---
 
@@ -113,14 +118,15 @@ heavily in the Mediterranean summer months, as expected.
 
 ## Class distribution
 
-Computed across all 26,854 masks (1.76 billion pixels total):
+Computed across the 26,846 released masks, version 3.0:
 
 | Class | % of valid pixels |
 |---|---|
-| clear | 82.62% |
-| old_burn | 7.21% |
-| fresh_burn | 7.12% |
-| water | 2.32% |
+| clear | 77.26% |
+| old_burn | 7.32% |
+| fresh_burn | 7.19% |
+| older_burn | 6.24% |
+| water | 1.28% |
 | cloud | 0.54% |
 | shadow | 0.19% |
 
@@ -165,7 +171,10 @@ src/effis_loader.py   — loads and filters EFFIS fire perimeters
 src/s2_pipeline.py     — acquisition, masking, GeoTIFF export
 src/hf_upload.py       — streaming upload to Hugging Face (download → upload → delete, per fire)
 run_extraction.py      — driver: multi-threaded, quota-capped, fully resume-safe
+tools/                 — index and splits, label updates, label review, baselines, release
 ```
+
+`tools/README.md` lists what each tool does and the order to run them in.
 
 Each fire is downloaded, processed, and uploaded to Hugging Face individually, then
 deleted locally — so total local disk usage stays roughly flat regardless of final
@@ -176,8 +185,8 @@ dataset size.
 ## Setup
 
 ```bash
-git clone git@github.com:paramkaur10/burn2scar.git
-cd burn2scar
+git clone https://github.com/paramkaur10/burn2scar_dataset_creation.git
+cd burn2scar_dataset_creation
 pip install -r requirements.txt
 cp .env.example .env   # fill in your own CDSE + Hugging Face credentials
 ```
@@ -196,14 +205,27 @@ tracked in `output/quota_state.json` and skipped on the next run.
 ## Data
 
 This repository contains no data and no credentials — only the code that produced
-the dataset. The dataset itself lives at
+the dataset. The dataset itself is at
+[doi.org/10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827), mirrored at
 [huggingface.co/datasets/neet1797/burn2scar](https://huggingface.co/datasets/neet1797/burn2scar).
+
+## Licence
+
+The Apache License 2.0 in `LICENSE` covers the code in this repository only. The dataset
+has its own terms, set out in the `LICENSE.txt` that comes with it.
 
 ## Attribution
 
-Contains modified Copernicus Sentinel data. Burn labels derived from EFFIS
-(European Forest Fire Information System), Copernicus Emergency Management Service.
+```
+Contains modified Copernicus Sentinel data 2020-2026.
+Contains modified Copernicus Service information 2020-2026.
+Burn labels adapted from EFFIS, Copernicus Emergency Management Service,
+© European Union, 1995-2026, CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/). Changes: perimeters rasterised
+to a 10 m grid, split into fresh, old and older burn classes by date, and
+merged with cloud, cloud shadow and water classes.
+```
 
 ---
 
-**Author:** Parampuneet Kaur Thind (Param)
+**Authors:** Parampuneet Kaur Thind, Enrico Cadau, Roberto Del Prete, Silvia Ricolfi, Gabriele Meoni, Andrea Taramelli

@@ -1,0 +1,123 @@
+burn2scar dataset: licence terms
+
+This dataset combines the authors' own work with third-party data. Each part
+is covered by the terms below. Nothing in this file replaces or changes the
+terms of the third-party data.
+
+Part                                          Terms
+--------------------------------------------  ---------------------------------
+Authors' contributions (section 1)            CC BY 4.0
+Sentinel-2 imagery, water class (section 2)   Copernicus Sentinel legal notice
+Burn classes, EFFIS export (section 3)        CC BY 4.0, from EFFIS
+Cloud and shadow classes (section 4)          OmniCloudMask output (MIT software)
+
+
+1. Authors' contributions
+
+Copyright 2026 Parampuneet Kaur Thind
+
+To the extent that copyright or database rights apply, the following are
+licensed under the Creative Commons Attribution 4.0 International licence
+(CC BY 4.0):
+
+  - the selection of fires, scenes and tile extents
+  - the burn labelling (fresh, old and older burn), the check of winter
+    water, and the way the layers in *_mask.tif are combined
+  - the index file, including its splits and tile attributes
+  - the reviewed points
+  - the compilation of the dataset as a whole
+  - the dataset card, documentation and figures
+
+Licence summary: https://creativecommons.org/licenses/by/4.0/
+Legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+
+
+2. Sentinel-2 imagery and water class
+
+The *_s2.tif files contain modified Copernicus Sentinel-2 data. They were
+cropped to fixed tiles and resampled to a common 10 m grid. The water class in
+*_mask.tif is derived from the same data, using NDWI and the Sentinel-2 Scene
+Classification Layer. In scenes from November to February, water was kept
+only where a March to October scene of the same place shows water too, or
+cannot see the ground.
+
+The authors do not relicense this data. It is governed by the Legal Notice on
+the use of Copernicus Sentinel Data and Service Information:
+https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice
+
+Anyone who distributes this data or makes it public must include this notice:
+
+  Contains modified Copernicus Sentinel data 2020-2026.
+
+
+3. Burn classes and the EFFIS export
+
+The fresh burn, old burn and older burn classes in *_mask.tif are adapted from
+burnt-area perimeters published by the European Forest Fire Information System
+(EFFIS) of the Copernicus Emergency Management Service.
+
+  Source: https://forest-fire.emergency.copernicus.eu/
+  Copyright: © European Union, 1995-2026
+  Licence: CC BY 4.0, as stated at
+  https://forest-fire.emergency.copernicus.eu/about-effis/data-license
+
+Changes made to the EFFIS data:
+
+  - perimeters were reprojected and rasterised to each tile's 10 m grid,
+    using every perimeter that touches the tile and is dated before the scene
+  - burned pixels were split by the days between the recorded fire date and
+    the satellite acquisition date: fresh (up to 90 days), old (more than 90
+    and up to 365 days) and older (more than 365 days, only where the pixel
+    would otherwise be clear)
+  - burned pixels were merged with the other mask classes, with cloud, cloud
+    shadow and nodata taking priority over burn, and burn over water
+
+The Zenodo record also holds the EFFIS export that the burn classes were made
+from (effis_export_2026-08-04.zip), unchanged and with its own readme. Its
+terms are the EFFIS terms above.
+
+As a cautious measure, because EFFIS is a Copernicus service, distributions
+should also include this notice:
+
+  Contains modified Copernicus Service information 2020-2026.
+
+
+4. Cloud and cloud shadow classes
+
+These classes were predicted with OmniCloudMask, whose software is distributed
+under the MIT licence: https://github.com/DPIRD-DMA/OmniCloudMask
+
+
+5. Extraction code
+
+The code that built this dataset is in a separate repository, under the Apache
+License 2.0: https://github.com/paramkaur10/burn2scar_dataset_creation
+
+
+6. Redistribution
+
+If you redistribute this dataset or an adapted version of it:
+
+  - keep NOTICE.txt, or include its contents
+  - keep the licence information in this file, or link to it
+  - state what you changed
+
+
+7. No warranty and no endorsement
+
+This dataset is provided as is, without warranty of any kind, including as to
+accuracy, quality or fitness for any purpose. Labels can contain errors. The
+authors accept no liability arising from its use, to the extent the law allows.
+
+The Copernicus legal notice has its own warranty disclaimer and waiver of claims
+against the European Union and the data providers. Users should read it.
+
+Neither the European Union, ESA, the Joint Research Centre nor the EFFIS team
+has endorsed this dataset or its authors.
+
+
+8. Requests (not licence conditions)
+
+If you publish work or a model that uses this dataset, please cite it as shown
+in README.md (https://doi.org/10.5281/zenodo.23986827) and include the notices
+from NOTICE.txt in your documentation.

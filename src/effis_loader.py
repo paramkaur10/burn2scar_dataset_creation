@@ -55,3 +55,14 @@ def load_effis(path, countries=None, start_date=None, end_date=None, min_area_ha
     if end_date:   out = out[out["fire_date"] <= pd.Timestamp(end_date)]
     if min_area_ha: out = out[out["area_ha"].fillna(0) >= min_area_ha]
     return out.sort_values("area_ha", ascending=False).reset_index(drop=True)
+
+
+def load_all_perimeters(path, extra_paths=()):
+    """Every perimeter in the export(s), with no country, date or area filter.
+
+    Masks need all of these: a scar stays burned whatever fire selection is used
+    to choose which tiles get downloaded.
+    """
+    parts = [load_effis(p) for p in [path, *(extra_paths or [])]]
+    merged = pd.concat(parts, ignore_index=True).drop_duplicates("fire_id").reset_index(drop=True)
+    return gpd.GeoDataFrame(merged, geometry="geometry", crs=parts[0].crs)

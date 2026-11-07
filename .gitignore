@@ -19,3 +19,18 @@ __pycache__/
 
 # os
 .DS_Store
+/audit/
+/review/
+/.venv/
+/validation/
+/results*/
+
+# made on the server, not code
+/review_final/
+/paper/
+/effis/
+*.log
+nohup.out
+
+# the land outline the paper figures draw, from Natural Earth (public domain)
+!/tools/data/land_med_ne50m.geojson

@@ -1,9 +1,11 @@
 sentinelhub
 eo-learn
 geopandas
+pyogrio
 rasterio
 numpy
-pandas
+pandas<3          # eo-learn needs geopandas 0.14, which fails on pandas 3
+setuptools<81     # eo-learn's fs dependency needs pkg_resources
 omnicloudmask
 huggingface_hub
 python-dotenv
