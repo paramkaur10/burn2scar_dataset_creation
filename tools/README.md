@@ -169,8 +169,13 @@ or after the GPU runs, not alongside them: they use every core. `--methods spect
 python tools/run_baselines.py --gpus 0 1 --specs unet_r34 segformer_b2 --cache-root data/cache
 python tools/run_baselines.py --gpus 0 1 --cache-root data/cache
 python tools/classic_baselines.py --workers 8 --cache-root data/cache
+python tools/classic_baselines.py --workers 8 --cache-root data/cache --target fresh
 python tools/summarize_results.py --results results
 ```
+
+The main task in the tables is fresh burn against everything else, old burn included, as for an alert
+on new fires. The deep models give it from the same runs; the classic baselines need the run with
+`--target fresh`. The tables also keep fresh and old burn together, for reference.
 
 | What runs | Runs |
 |---|---|

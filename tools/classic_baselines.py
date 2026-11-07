@@ -13,7 +13,9 @@ image, so the same indices are used on one image:
                indices. Training samples: N/2 burnt, N/2 unburnt, with 10% of the
                unburnt pixels taken from water, as in FLOGA.
 
-All of these answer burnt or unburnt. Cloud, shadow, older_burn and nodata pixels are
+All of these answer burnt or unburnt. With --target burn (the default), burnt is fresh and
+old burn together. With --target fresh, burnt is fresh burn only and old burn counts as
+unburnt, as an alert for new fires needs. Cloud, shadow, older_burn and nodata pixels are
 left out. Classifier evaluation uses a regular 1-in-16 pixel grid to keep prediction
 time reasonable; index evaluation uses every pixel.
 """
@@ -32,9 +34,20 @@ BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "
 B = {name: i for i, name in enumerate(BANDS)}
 IGNORE = 255
 LABELS = np.full(256, IGNORE, np.uint8)
-LABELS[[0, 6]] = 0  # clear and water are unburnt
-LABELS[[2, 3]] = 1  # fresh and old burn are burnt
+TASK = {"name": "burn"}
 WATER_VALUE = 6
+
+
+def set_target(target):
+    """burn: fresh and old burn are burnt. fresh: only fresh burn is, and old burn joins clear and water."""
+    LABELS[:] = IGNORE
+    LABELS[[0, 6]] = 0
+    LABELS[2] = 1
+    LABELS[3] = 1 if target == "burn" else 0
+    TASK["name"] = target
+
+
+set_target("burn")
 
 
 def indices(image):
@@ -123,12 +136,12 @@ def two_class_metrics(matrix):
 
 
 def save_run(out, name, kind, split, seed, extra, val_matrix, test_tiles, tile_ids, started):
-    run_dir = Path(out) / f"{name}__{split}__burn__seed{seed}"
+    run_dir = Path(out) / f"{name}__{split}__{TASK['name']}__seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     test_tiles = np.asarray(test_tiles, dtype=np.int64)
     np.savez_compressed(run_dir / "test_tile_confusion.npz", tile_id=np.asarray(tile_ids, dtype=str), matrices=test_tiles,
                         classes=np.array(["unburnt", "burnt"]))
-    result = {"name": name, "kind": kind, "split": split, "task": "burn", "seed": seed, **extra,
+    result = {"name": name, "kind": kind, "split": split, "task": TASK["name"], "seed": seed, **extra,
               "minutes": (time.time() - started) / 60, "val": two_class_metrics(val_matrix),
               "test": two_class_metrics(test_tiles.sum(0))}
     (run_dir / "metrics.json").write_text(json.dumps(result, indent=1))
@@ -137,7 +150,7 @@ def save_run(out, name, kind, split, seed, extra, val_matrix, test_tiles, tile_i
 
 def run_spectral(args, paths, ids, pool):
     started = time.time()
-    if all((Path(args.out) / f"{n}__{args.split_col}__burn__seed0" / "metrics.json").exists() for n in INDEX_NAMES):
+    if all((Path(args.out) / f"{n}__{args.split_col}__{TASK['name']}__seed0" / "metrics.json").exists() for n in INDEX_NAMES):
         print("Spectral indices already finished")
         return
     rng = np.random.default_rng(0)
@@ -287,7 +300,7 @@ def evaluate_classifier(model, paths, stride, pool, tiles_per_batch=256):
 
 
 def run_classifier(method, seed, args, paths, ids, pool):
-    run_dir = Path(args.out) / f"{method}__{args.split_col}__burn__seed{seed}"
+    run_dir = Path(args.out) / f"{method}__{args.split_col}__{TASK['name']}__seed{seed}"
     if (run_dir / "metrics.json").exists():
         print(f"{method} seed {seed}: already finished")
         return
@@ -320,7 +333,10 @@ def main():
     parser.add_argument("--threshold-bins", type=int, default=2000)
     parser.add_argument("--xgb-gpu", action="store_true")
     parser.add_argument("--limit", type=int, default=0, help="use only this many tiles per split, for a quick trial")
+    parser.add_argument("--target", choices=["burn", "fresh"], default="burn",
+                        help="burn: fresh and old burn are burnt. fresh: only fresh burn is")
     args = parser.parse_args()
+    set_target(args.target)
 
     index = pd.read_csv(args.index, low_memory=False)
     paths, ids = {}, {}
@@ -336,7 +352,7 @@ def main():
             paths[split] = [(str(Path(args.images_root) / i), str(Path(args.masks_root) / m))
                             for i, m in zip(frame["image_path"], frame["mask_path"])]
     print({k: len(v) for k, v in paths.items()}, flush=True)
-    with ProcessPoolExecutor(args.workers) as pool:
+    with ProcessPoolExecutor(args.workers, initializer=set_target, initargs=(args.target,)) as pool:
         if "spectral" in args.methods:
             run_spectral(args, paths, ids, pool)
         for method in [m for m in args.methods if m != "spectral"]:
