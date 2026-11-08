@@ -139,7 +139,7 @@ def figure_workflow(out):
     steps = [("1  Select fires", f"5\u20132000 ha; France south of 46° N\n{number(19443)} fires", 1.0),
              ("2  Share the budget by country", f"largest fires first\n{number(13895)} fires kept", 1.0),
              ("3  Search two windows per fire", f"5\u201360 and 120\u2013300 days after the fire date\nleast cloudy scene with burn at most\n50 % hidden; {number(26846)} tiles", 1.2),
-             ("4  Build masks", "burn age from every EFFIS perimeter in the tile,\nthen water, shadow and cloud", 1.0),
+             ("4  Build masks", "burn age from every EFFIS perimeter in the tile,\nthen water, shadow and cloud; winter water\nchecked on the fire's March–October scene", 1.2),
              ("5  Assign spatial blocks", "overlapping fires stay together\nmain, time and country splits", 1.0)]
     top = 8.18
     previous = None
