@@ -1,0 +1,34 @@
+{
+ "name": "NDVI",
+ "kind": "index",
+ "split": "split",
+ "task": "fresh",
+ "seed": 0,
+ "threshold": 0.23933199161291124,
+ "lower_is_burnt": true,
+ "minutes": 4.655072009563446,
+ "val": {
+  "burnt_precision": 0.23241896209439916,
+  "burnt_recall": 0.7323885486025604,
+  "burnt_f1": 0.35285999420354003,
+  "burnt_iou": 0.2142258660234032,
+  "unburnt_precision": 0.9683292886968283,
+  "unburnt_recall": 0.7718351118015871,
+  "unburnt_f1": 0.8589884318837936,
+  "unburnt_iou": 0.7528306074073999,
+  "mean_f1": 0.6059242130436668,
+  "mean_iou": 0.48352823671540157
+ },
+ "test": {
+  "burnt_precision": 0.22012708687699653,
+  "burnt_recall": 0.7553857560528874,
+  "burnt_f1": 0.3409096397929253,
+  "burnt_iou": 0.20547985086862638,
+  "unburnt_precision": 0.973049704339983,
+  "unburnt_recall": 0.7674501419444013,
+  "unburnt_f1": 0.858106520731817,
+  "unburnt_iou": 0.7514768551631984,
+  "mean_f1": 0.5995080802623711,
+  "mean_iou": 0.4784783530159124
+ }
+}

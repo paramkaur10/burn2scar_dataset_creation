@@ -24,6 +24,16 @@ __pycache__/
 /.venv/
 /validation/
 /results*/
+# The scores behind Table 9 are kept; the model weights are not (they go to Hugging Face).
+!/results/
+/results/**
+!/results/*/
+!/results/summary.md
+!/results/*.csv
+!/results/band_stats.json
+!/results/*/metrics.json
+!/results/*/test_tile_confusion.npz
+/release_models/
 
 # made on the server, not code
 /review_final/

@@ -1,0 +1,34 @@
+{
+ "name": "BAIS2",
+ "kind": "index",
+ "split": "split",
+ "task": "burn",
+ "seed": 0,
+ "threshold": 0.7102056020263736,
+ "lower_is_burnt": false,
+ "minutes": 42.3266060868899,
+ "val": {
+  "burnt_precision": 0.45025691337657425,
+  "burnt_recall": 0.43523198065944685,
+  "burnt_f1": 0.44261697585226545,
+  "burnt_iou": 0.2842055993864991,
+  "unburnt_precision": 0.882494450423228,
+  "unburnt_recall": 0.8886643512962111,
+  "unburnt_f1": 0.8855686543143659,
+  "unburnt_iou": 0.7946372450332825,
+  "mean_f1": 0.6640928150833156,
+  "mean_iou": 0.5394214222098908
+ },
+ "test": {
+  "burnt_precision": 0.44028825334935856,
+  "burnt_recall": 0.4659433576222196,
+  "burnt_f1": 0.4527526619100835,
+  "burnt_iou": 0.2926181553293274,
+  "unburnt_precision": 0.897151718313931,
+  "unburnt_recall": 0.8871961500859479,
+  "unburnt_f1": 0.8921461612133774,
+  "unburnt_iou": 0.8052922957693597,
+  "mean_f1": 0.6724494115617304,
+  "mean_iou": 0.5489552255493435
+ }
+}

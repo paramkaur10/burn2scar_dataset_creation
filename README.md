@@ -209,6 +209,20 @@ the dataset. The dataset itself is at
 [doi.org/10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827), mirrored at
 [huggingface.co/datasets/neet1797/burn2scar](https://huggingface.co/datasets/neet1797/burn2scar).
 
+## Baseline model and results
+
+A trained U-Net (ResNet-34) baseline is at
+[huggingface.co/neet1797/burn2scar-unet-r34](https://huggingface.co/neet1797/burn2scar-unet-r34), with its
+model card. Run it on any 13-band Sentinel-2 Level-1C GeoTIFF:
+
+```bash
+python tools/predict.py --model neet1797/burn2scar-unet-r34 --image tile_s2.tif --out tile_pred.tif
+```
+
+`notebooks/02_quickstart.ipynb` downloads one tile, shows its image and mask, and runs the model on it.
+The scores behind the paper's baseline table are in `results/`: `summary.md`, the CSV tables, and each
+run's `metrics.json` and per-tile confusion matrices, so `tools/summarize_results.py` can be rerun.
+
 ## Licence
 
 The Apache License 2.0 in `LICENSE` covers the code in this repository only. The dataset

@@ -1,0 +1,34 @@
+{
+ "name": "NBR2",
+ "kind": "index",
+ "split": "split",
+ "task": "fresh",
+ "seed": 0,
+ "threshold": 0.14558955313323158,
+ "lower_is_burnt": true,
+ "minutes": 4.652064323425293,
+ "val": {
+  "burnt_precision": 0.5337624999982894,
+  "burnt_recall": 0.574448918223803,
+  "burnt_f1": 0.5533588368983969,
+  "burnt_iou": 0.38251285184778916,
+  "unburnt_precision": 0.9595665928033047,
+  "unburnt_recall": 0.9526668785164731,
+  "unburnt_f1": 0.9561042878971147,
+  "unburnt_iou": 0.9159001965541956,
+  "mean_f1": 0.7547315623977557,
+  "mean_iou": 0.6492065242009923
+ },
+ "test": {
+  "burnt_precision": 0.43827939407880423,
+  "burnt_recall": 0.6421093070689923,
+  "burnt_f1": 0.520966718247936,
+  "burnt_iou": 0.3522346147821625,
+  "unburnt_precision": 0.9675912202649389,
+  "unburnt_recall": 0.9284886123960913,
+  "unburnt_f1": 0.9476367123314516,
+  "unburnt_iou": 0.9004843892178028,
+  "mean_f1": 0.7343017152896938,
+  "mean_iou": 0.6263595019999827
+ }
+}

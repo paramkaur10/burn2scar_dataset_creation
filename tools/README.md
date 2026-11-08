@@ -299,6 +299,48 @@ python tools/upload_hf.py check
 masks that differ from the Hub, 1,000 to a commit, and in a last commit adds `index.csv`, the dataset card,
 `LICENSE.txt` and `NOTICE.txt`, and removes the tiles left out of the release. `plan` changes nothing.
 
+## 12. Release the baseline model (minutes, about 100 MB)
+
+```bash
+python tools/release_models.py build --spec unet_r34
+python tools/release_models.py upload --spec unet_r34 --repo neet1797/burn2scar-unet-r34
+python tools/release_models.py check --spec unet_r34 --repo neet1797/burn2scar-unet-r34
+```
+
+`build` takes the U-Net seed with the median fresh-burn F1 on the main split's test set, a typical run rather
+than the best, and writes `release_models/burn2scar-unet-r34/`: the weights as `model.safetensors`, `config.json`
+with the bands, scaling and class values, `metrics.json` with every seed's scores, the model card, `predict.py`
+and the licence. Read the model card before `upload`, which makes a public model repo. `check` downloads it again,
+compares every file and runs the model.
+
+Only U-Net ResNet-34 is released, under Apache 2.0. SegFormer-B2 is not: its encoder starts from NVIDIA's MiT
+ImageNet weights, whose licence allows only non-commercial use of anything derived from them.
+
+`predict.py` runs a released model on any 13-band Level-1C GeoTIFF, of any size:
+
+```bash
+python tools/predict.py --model neet1797/burn2scar-unet-r34 --image tile_s2.tif --out tile_pred.tif
+```
+
+## 13. Random gallery (minutes, CPU is enough)
+
+```bash
+python tools/make_gallery.py --model release_models/burn2scar-unet-r34 --out paper/gallery
+```
+
+Eight test tiles drawn at random with a fixed seed, not chosen by hand: true colour, mask and prediction, with
+the share of pixels where they agree. Writes `gallery.png`, `gallery.pdf` and `gallery.json`.
+
+## 14. Scores behind Table 9 in the repository
+
+`.gitignore` keeps `results/summary.md`, the CSV tables, `band_stats.json` and each run's `metrics.json` and
+`test_tile_confusion.npz`, so anyone can rerun `summarize_results.py`. Model weights (`best.pt`) stay out.
+
+## Quickstart notebook
+
+`notebooks/02_quickstart.ipynb` downloads one tile from Hugging Face, shows it, runs the released model and
+scores it. It reads an unzipped Zenodo release instead when `BURN2SCAR_ROOT` points to it.
+
 ## What each new mask class means
 
 | Value | Class | Meaning |
@@ -334,3 +376,6 @@ the burnt-class metrics, since the ground under them can't be seen.
 | `fetch_prefire.py` | Pre-fire images |
 | `add_product_ids.py` | Source products, from the public catalogue |
 | `upload_hf.py` | Brings the Hugging Face copy up to the release, after tagging the old one `v1` |
+| `release_models.py` | The baseline model on Hugging Face, with its model card |
+| `predict.py` | Runs a released model on Level-1C images |
+| `make_gallery.py` | Random test tiles with mask and prediction |

@@ -1,0 +1,34 @@
+{
+ "name": "SAVI",
+ "kind": "index",
+ "split": "split",
+ "task": "fresh",
+ "seed": 0,
+ "threshold": 0.09769038110375457,
+ "lower_is_burnt": true,
+ "minutes": 4.657995927333832,
+ "val": {
+  "burnt_precision": 0.32273685837674,
+  "burnt_recall": 0.6582025819736823,
+  "burnt_f1": 0.4331077429321419,
+  "burnt_iou": 0.27641194918061623,
+  "unburnt_precision": 0.9642528340182926,
+  "unburnt_recall": 0.8697064123390881,
+  "unburnt_f1": 0.9145425390749686,
+  "unburnt_iou": 0.8425411146887246,
+  "mean_f1": 0.6738251410035553,
+  "mean_iou": 0.5594765319346704
+ },
+ "test": {
+  "burnt_precision": 0.2982535490491743,
+  "burnt_recall": 0.6595677530319641,
+  "burnt_f1": 0.410762263801705,
+  "burnt_iou": 0.2584649574105335,
+  "unburnt_precision": 0.9669375786659642,
+  "unburnt_recall": 0.8651499983041112,
+  "unburnt_f1": 0.913216218546199,
+  "unburnt_iou": 0.8402924612332557,
+  "mean_f1": 0.6619892411739521,
+  "mean_iou": 0.5493787093218946
+ }
+}

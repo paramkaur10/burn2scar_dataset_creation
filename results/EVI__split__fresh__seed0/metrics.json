@@ -1,0 +1,34 @@
+{
+ "name": "EVI",
+ "kind": "index",
+ "split": "split",
+ "task": "fresh",
+ "seed": 0,
+ "threshold": 0.13076547818371737,
+ "lower_is_burnt": true,
+ "minutes": 4.656680011749268,
+ "val": {
+  "burnt_precision": 0.3114166442284695,
+  "burnt_recall": 0.666288486195971,
+  "burnt_f1": 0.42444969961268253,
+  "burnt_iou": 0.26939774598649124,
+  "unburnt_precision": 0.9647292541081655,
+  "unburnt_recall": 0.8610266276909426,
+  "unburnt_f1": 0.9099327950470776,
+  "unburnt_iou": 0.8347492621671666,
+  "mean_f1": 0.66719124732988,
+  "mean_iou": 0.552073504076829
+ },
+ "test": {
+  "burnt_precision": 0.28800967778705094,
+  "burnt_recall": 0.674337226155196,
+  "burnt_f1": 0.40362918284283716,
+  "burnt_iou": 0.2528417448532572,
+  "unburnt_precision": 0.9679677483748426,
+  "unburnt_recall": 0.8551424680296901,
+  "unburnt_f1": 0.9080639468422946,
+  "unburnt_iou": 0.8316090893933927,
+  "mean_f1": 0.6558465648425659,
+  "mean_iou": 0.542225417123325
+ }
+}

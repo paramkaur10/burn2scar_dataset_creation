@@ -1,0 +1,34 @@
+{
+ "name": "NDWI",
+ "kind": "index",
+ "split": "split",
+ "task": "fresh",
+ "seed": 0,
+ "threshold": -0.23373232568567964,
+ "lower_is_burnt": false,
+ "minutes": 4.655867171287537,
+ "val": {
+  "burnt_precision": 0.2976542110318555,
+  "burnt_recall": 0.6768700648709667,
+  "burnt_f1": 0.4134801566509955,
+  "burnt_iou": 0.2606208541194008,
+  "unburnt_precision": 0.9653552430181692,
+  "unburnt_recall": 0.8493396934956278,
+  "unburnt_f1": 0.9036389640173721,
+  "unburnt_iou": 0.8242165986932158,
+  "mean_f1": 0.6585595603341838,
+  "mean_iou": 0.5424187264063083
+ },
+ "test": {
+  "burnt_precision": 0.2710113017021986,
+  "burnt_recall": 0.6661584159604962,
+  "burnt_f1": 0.385280181480015,
+  "burnt_iou": 0.2386049747213445,
+  "unburnt_precision": 0.9667820589279156,
+  "unburnt_recall": 0.8442931032085521,
+  "unburnt_f1": 0.901395416075059,
+  "unburnt_iou": 0.8204912206489067,
+  "mean_f1": 0.643337798777537,
+  "mean_iou": 0.5295480976851256
+ }
+}

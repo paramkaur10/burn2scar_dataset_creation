@@ -1,0 +1,34 @@
+{
+ "name": "RF",
+ "kind": "pixel",
+ "split": "split",
+ "task": "burn",
+ "seed": 3,
+ "training_pixels": 1962380,
+ "eval_stride": 4,
+ "minutes": 127.80640513102213,
+ "val": {
+  "burnt_precision": 0.42567329017903577,
+  "burnt_recall": 0.6692894138942491,
+  "burnt_f1": 0.5203805131161718,
+  "burnt_iou": 0.3516988778054863,
+  "unburnt_precision": 0.921242336967458,
+  "unburnt_recall": 0.8107434729475185,
+  "unburnt_f1": 0.8624680495921038,
+  "unburnt_iou": 0.758192373658463,
+  "mean_f1": 0.6914242813541378,
+  "mean_iou": 0.5549456257319747
+ },
+ "test": {
+  "burnt_precision": 0.38527585236041745,
+  "burnt_recall": 0.7251204115687473,
+  "burnt_f1": 0.5031922273270684,
+  "burnt_iou": 0.3361769203192274,
+  "unburnt_precision": 0.9370636935426018,
+  "unburnt_recall": 0.7796124613375808,
+  "unburnt_f1": 0.8511174696241082,
+  "unburnt_iou": 0.7408220136706573,
+  "mean_f1": 0.6771548484755883,
+  "mean_iou": 0.5384994669949423
+ }
+}
