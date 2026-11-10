@@ -1,0 +1,14 @@
+# Rebuild the dataset: run_extraction.py and src/ (Sentinel Hub, EFFIS, OmniCloudMask, Hugging Face upload).
+# The release was built with eo-learn 1.3.1; pipeline.lock.txt, where present, has every exact version.
+sentinelhub
+eo-learn
+geopandas
+pyogrio
+rasterio
+numpy
+pandas<3          # eo-learn needs geopandas 0.14, which fails on pandas 3
+setuptools<81     # eo-learn's fs dependency needs pkg_resources
+omnicloudmask
+huggingface_hub
+python-dotenv
+pyyaml

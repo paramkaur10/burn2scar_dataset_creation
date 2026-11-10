@@ -1,0 +1,10 @@
+# conda env create -f environment.yml && conda activate burn2scar
+# The same packages as requirements.txt. Python is the version the paper's results were made with.
+name: burn2scar
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -r requirements.txt

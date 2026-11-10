@@ -176,7 +176,7 @@ def main():
     parser.add_argument("--release-index", default="data/release/index.csv", help="the index uploaded to Zenodo")
     parser.add_argument("--full-index", default="data/v3/index.csv", help="to find the tiles left out of the release")
     parser.add_argument("--masks-root", default="data/v3")
-    parser.add_argument("--card", default="HF_DATASET_CARD.md")
+    parser.add_argument("--card", default="release_docs/huggingface_card.md")
     parser.add_argument("--licence", default="release_docs/LICENSE.txt")
     parser.add_argument("--notice", default="release_docs/NOTICE.txt")
     parser.add_argument("--batch", type=int, default=1000, help="masks per commit")

@@ -1,10 +1,12 @@
 """Run a burn2scar baseline model on Sentinel-2 Level-1C images and write burn2scar-style masks.
 
-  python predict.py --model neet1797/burn2scar-unet-r34 --image tile_s2.tif --out tile_pred.tif
-  python predict.py --model ./burn2scar-unet-r34 --image a_s2.tif b_s2.tif --out-dir predictions
+  python tools/predict.py --model models/burn2scar-unet-r34 --image tile_s2.tif --out tile_pred.tif
+  python tools/predict.py --model neet1797/burn2scar-unet-r34 --image a_s2.tif b_s2.tif --out-dir predictions
 
---model is a folder holding config.json and model.safetensors, or a Hugging Face model repo, which is
-downloaded once into the Hugging Face cache.
+--model is a folder holding config.json, or a Hugging Face model repo, which is downloaded once into the
+Hugging Face cache. A folder without model.safetensors, such as models/burn2scar-unet-r34 in the code
+repository, gets the weights from the Hugging Face repo its config.json names (hub_repo) on first use,
+checked against the sha256 in config.json.
 
 Input: a GeoTIFF with the 13 Sentinel-2 Level-1C bands in the order B01, B02, B03, B04, B05, B06, B07,
 B08, B8A, B09, B10, B11, B12, as top-of-atmosphere reflectance times 10,000 on a 10 m grid, the way
@@ -19,6 +21,7 @@ Needs numpy, torch, segmentation-models-pytorch, safetensors and rasterio; huggi
 --model names a Hub repo.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -30,10 +33,35 @@ MASK_COLORMAP = {0: (200, 200, 200, 255), 2: (220, 60, 20, 255), 3: (150, 40, 20
                  5: (60, 60, 90, 255), 6: (30, 90, 200, 255), 7: (120, 95, 70, 255), 255: (0, 0, 0, 0)}
 
 
+def fetch_weights(folder):
+    """Download model.safetensors into a model folder from the Hub repo its config.json names, once."""
+    config = json.loads((folder / "config.json").read_text())
+    repo = config.get("hub_repo")
+    if not repo:
+        raise SystemExit(f"{folder} has no model.safetensors, and its config.json names no hub_repo to get it from.")
+    from huggingface_hub import hf_hub_download
+    print(f"Downloading the weights from huggingface.co/{repo} into {folder}, once.", flush=True)
+    weights = Path(hf_hub_download(repo_id=repo, filename="model.safetensors", revision=config.get("hub_revision"),
+                                   local_dir=folder))
+    expected = config.get("weights_sha256")
+    if expected:
+        digest = hashlib.sha256()
+        with open(weights, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+        if digest.hexdigest() != expected:
+            weights.unlink()
+            raise SystemExit(f"The downloaded weights don't match config.json (sha256). Nothing was kept; try again, "
+                             f"or check that huggingface.co/{repo} still holds the released model.")
+
+
 def resolve_model(model):
-    """A local folder as it is, or a Hub repo downloaded into the Hugging Face cache."""
-    if Path(model).is_dir():
-        return Path(model)
+    """A local folder (its weights fetched once if missing), or a Hub repo downloaded into the Hugging Face cache."""
+    folder = Path(model)
+    if folder.is_dir():
+        if not (folder / "model.safetensors").exists():
+            fetch_weights(folder)
+        return folder
     from huggingface_hub import snapshot_download
     return Path(snapshot_download(repo_id=model, allow_patterns=["config.json", "model.safetensors"]))
 
@@ -101,7 +129,8 @@ def predict_file(net, config, image_path, out_path, device="cpu", batch=8):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model", required=True, help="folder with config.json and model.safetensors, or a Hub repo id")
+    parser.add_argument("--model", default=str(Path(__file__).resolve().parent.parent / "models" / "burn2scar-unet-r34"),
+                        help="model folder (default: the repository's models/burn2scar-unet-r34) or a Hub repo id")
     parser.add_argument("--image", required=True, nargs="+", help="one or more 13-band Level-1C GeoTIFFs")
     parser.add_argument("--out", help="output file, with one --image")
     parser.add_argument("--out-dir", help="output folder, with several --image; files are named <image>_pred.tif")

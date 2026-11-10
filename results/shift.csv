@@ -1,6 +1,0 @@
-Unseen in training,Test tiles,"Fresh F1, trained on all","Fresh F1, trained without","Fresh F1, change","Burnt F1 (fresh + old), trained on all","Burnt F1 (fresh + old), trained without","Burnt F1 (fresh + old), change"
-country EL,420,86.90 ± 1.60,86.16 ± 0.50,-0.74,84.82 ± 1.44,81.27 ± 1.58,-3.55
-country ES,829,88.25 ± 1.24,83.11 ± 3.68,-5.14,88.02 ± 0.77,87.37 ± 0.59,-0.65
-country FR,980,74.24 ± 0.97,68.17 ± 1.30,-6.07,66.81 ± 1.63,63.96 ± 1.56,-2.85
-country IT,3191,77.96 ± 1.20,70.38 ± 2.71,-7.57,69.77 ± 0.96,60.67 ± 1.48,-9.1
-fires from 2025 on,1414,83.73 ± 0.72,82.93 ± 0.82,-0.8,77.19 ± 0.72,76.16 ± 0.56,-1.02

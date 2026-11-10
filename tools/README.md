@@ -1,6 +1,7 @@
-# burn2scar v2 tools
+# Tools: how the release and the paper's results were made
 
-Run these in order from the repo root. Everything is safe to stop and restart. Nothing
+These are the steps behind burn2scar 3.0 and its data paper, as they were run on our server. Run them in
+order from the repo root. Everything is safe to stop and restart. Nothing
 here changes the published dataset: new files go under `data/`, `results/`, `review/` and `validation/`.
 
 Anything marked long belongs in the tmux `runs` window. Commands below use `--workers 8`, so change that to
@@ -16,7 +17,7 @@ then:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt -r tools/requirements.txt jupyterlab
+.venv/bin/python -m pip install -r environment/pipeline.txt -r environment/tools.txt jupyterlab
 ```
 
 Start the workspace once, from an SSH shell on the server. It makes a tmux session called `b2s`, with
@@ -281,10 +282,11 @@ python tools/review_points.py export --out review_final
 ## 10. Record the environment
 
 ```bash
-pip freeze > requirements.lock.txt
+pip freeze > environment/paper-gpu.lock.txt
 ```
 
-The journal needs the exact versions, and `requirements.txt` has none.
+The journal needs the exact versions, and the requirement files give only lower bounds. The lock files in
+`environment/` start with a comment saying which machine and Python they come from.
 
 ## 11. Hugging Face copy (about an hour, safe to stop and restart)
 
@@ -316,10 +318,21 @@ compares every file and runs the model.
 Only U-Net ResNet-34 is released, under Apache 2.0. SegFormer-B2 is not: its encoder starts from NVIDIA's MiT
 ImageNet weights, whose licence allows only non-commercial use of anything derived from them.
 
-`predict.py` runs a released model on any 13-band Level-1C GeoTIFF, of any size:
+Then put the model in the code repository, without its weights:
 
 ```bash
-python tools/predict.py --model neet1797/burn2scar-unet-r34 --image tile_s2.tif --out tile_pred.tif
+python tools/release_models.py export --spec unet_r34 --repo neet1797/burn2scar-unet-r34
+```
+
+`export` writes `models/burn2scar-unet-r34/`: `config.json` with the Hub repo and the weights' sha256 added,
+`metrics.json`, and the model card with the repository's commands. `predict.py` fetches the weights into that
+folder on first use and checks them.
+
+`predict.py` runs a released model on any 13-band Level-1C GeoTIFF, of any size; `--model` defaults to
+`models/burn2scar-unet-r34`:
+
+```bash
+python tools/predict.py --image tile_s2.tif --out tile_pred.tif
 ```
 
 ## 13. Random gallery (minutes, CPU is enough)
@@ -331,15 +344,22 @@ python tools/make_gallery.py --model release_models/burn2scar-unet-r34 --out pap
 Eight test tiles drawn at random with a fixed seed, not chosen by hand: true colour, mask and prediction, with
 the share of pixels where they agree. Writes `gallery.png`, `gallery.pdf` and `gallery.json`.
 
-## 14. Scores behind Table 9 in the repository
+## 14. README picture, example fire and notebooks (minutes)
 
-`.gitignore` keeps `results/summary.md`, the CSV tables, `band_stats.json` and each run's `metrics.json` and
-`test_tile_confusion.npz`, so anyone can rerun `summarize_results.py`. Model weights (`best.pt`) stay out.
+```bash
+python tools/make_readme_figure.py
+python tools/make_examples.py
+jupyter nbconvert --to notebook --execute --inplace notebooks/01_explore_burn2scar.ipynb notebooks/02_run_the_model.ipynb
+```
 
-## Quickstart notebook
+`make_readme_figure.py` draws `assets/burn2scar_examples.png`: one fresh scene per country and two old scenes,
+at random among tiles with at least 15 % burn. `make_examples.py` copies one fire from the test set, both scenes
+and their masks, into `examples/`, with its rows of the index and a README. Executing the notebooks saves their
+figures in them, so GitHub shows them. They download their tiles from Hugging Face, or read an unzipped Zenodo
+release when `BURN2SCAR_ROOT` points to it.
 
-`notebooks/02_quickstart.ipynb` downloads one tile from Hugging Face, shows it, runs the released model and
-scores it. It reads an unzipped Zenodo release instead when `BURN2SCAR_ROOT` points to it.
+`results/` stays on the server and out of git: the paper's tables come from it, and the model card carries the
+released model's scores.
 
 ## What each new mask class means
 
@@ -379,3 +399,5 @@ the burnt-class metrics, since the ground under them can't be seen.
 | `release_models.py` | The baseline model on Hugging Face, with its model card |
 | `predict.py` | Runs a released model on Level-1C images |
 | `make_gallery.py` | Random test tiles with mask and prediction |
+| `make_readme_figure.py` | The picture at the top of the README |
+| `make_examples.py` | One test fire, both scenes and masks, into `examples/` |

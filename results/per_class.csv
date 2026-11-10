@@ -1,3 +1,0 @@
-Method,Seeds,mIoU,clear IoU,fresh_burn IoU,old_burn IoU,cloud IoU,shadow IoU,water IoU,Fresh vs old accuracy
-segformer_b2,5,74.89 ± 0.50,91.23 ± 0.06,70.53 ± 0.37,51.58 ± 0.82,77.50 ± 1.50,71.55 ± 0.92,86.95 ± 0.21,96.60 ± 0.34
-unet_r34,5,70.44 ± 1.37,89.29 ± 0.69,67.63 ± 1.63,45.85 ± 1.79,70.51 ± 1.46,64.48 ± 3.54,84.88 ± 0.41,95.89 ± 0.55

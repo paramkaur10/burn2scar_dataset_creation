@@ -1,0 +1,10 @@
+# The tools in tools/ that made the index, label review, baselines and paper figures, on top of pipeline.txt.
+# torch comes with omnicloudmask. Install the build that matches your GPU driver first.
+segmentation-models-pytorch>=0.5
+timm
+scikit-learn
+xgboost
+scipy
+pillow
+huggingface_hub
+matplotlib      # only for make_paper_figures.py

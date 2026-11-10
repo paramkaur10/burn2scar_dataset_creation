@@ -1,7 +1,7 @@
-# secrets — never committed
+# secrets: never committed
 .env
 
-# data — extracted locally, streamed to HF, never committed here
+# data: downloaded or made locally, published on Zenodo and Hugging Face, never committed here
 /data/
 /output/
 /temp_data/
@@ -11,36 +11,37 @@
 *.zip
 quota_state.json
 processing_index.csv
+# ...except the one example fire, which ships with the repository
+!/examples/*.tif
 
-# python
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-
-# os
-.DS_Store
-/audit/
-/review/
-/.venv/
-/validation/
-/results*/
-# The scores behind Table 9 are kept; the model weights are not (they go to Hugging Face).
-!/results/
-/results/**
-!/results/*/
-!/results/summary.md
-!/results/*.csv
-!/results/band_stats.json
-!/results/*/metrics.json
-!/results/*/test_tile_confusion.npz
+# model weights: on Hugging Face, fetched into models/<name>/ on first use
+*.safetensors
+*.pt
+/models/**/.cache/
 /release_models/
 
-# made on the server, not code
+# working folders on the server: runs, reviews, paper drafts
+/results*/
+/audit/
+/review/
 /review_final/
+/validation/
 /paper/
 /effis/
+/hf_release/
 *.log
 nohup.out
 
-# the land outline the paper figures draw, from Natural Earth (public domain)
+# python and notebooks
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+/.venv/
+/notebooks/prediction_example.tif
+/predictions/
+
+# os
+.DS_Store
+
+# the land outline the paper figures and the notebook draw, from Natural Earth (public domain)
 !/tools/data/land_med_ne50m.geojson

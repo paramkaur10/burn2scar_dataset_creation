@@ -6,12 +6,16 @@ they are a typical run, not the luckiest one. The model card gives the scores of
   python tools/release_models.py build --spec unet_r34
   python tools/release_models.py upload --spec unet_r34 --repo neet1797/burn2scar-unet-r34
   python tools/release_models.py check --spec unet_r34 --repo neet1797/burn2scar-unet-r34
+  python tools/release_models.py export --spec unet_r34 --repo neet1797/burn2scar-unet-r34
 
 build reads results/ (metrics.json, test_tile_confusion.npz and best.pt of each seed, and band_stats.json)
 and writes release_models/burn2scar-<spec>/: model.safetensors, config.json, metrics.json, README.md (the
 model card), predict.py and LICENSE. It needs no network.
 upload creates the model repo if it is missing, as a public repo, and uploads the folder in one commit.
 check downloads what is on the Hub, compares it byte for byte with the folder, and runs the model once.
+export writes models/burn2scar-<spec>/ for the code repository from the built folder: config.json, with the Hub
+repo and the weights' sha256 added so tools/predict.py can fetch and check them on first use; metrics.json; and
+the model card, without the Hub's metadata header and with the repository's commands. The weights stay on the Hub.
 
 Only specs listed in RELEASE can be released. SegFormer-B2 is not among them: its encoder starts from
 NVIDIA's MiT ImageNet weights, whose licence allows only non-commercial use of derived works.
@@ -261,10 +265,57 @@ def run_check(args):
     raise SystemExit(1 if problems else 0)
 
 
+GITHUB_USE = """## Use
+
+From the root of the code repository, after `pip install -r requirements.txt`:
+
+```bash
+python tools/predict.py --model models/{name} --image tile_s2.tif --out tile_pred.tif
+```
+
+```python
+import sys
+sys.path.insert(0, "tools")
+from predict import load_model, predict_array
+net, config = load_model("models/{name}")
+mask = predict_array(net, config, image)  # image: (13, height, width), reflectance x 10,000
+```
+
+The first use downloads the weights, `model.safetensors` ({size:.0f} MB), from
+[huggingface.co/{repo}](https://huggingface.co/{repo}) into this folder and checks them against the sha256 in
+`config.json`. `notebooks/02_run_the_model.ipynb` runs the model on random test tiles and draws the results.
+
+"""
+
+
+def run_export(args):
+    folder = folder_for(args)
+    missing = [name for name in ("model.safetensors", "config.json", "metrics.json", "README.md") if not (folder / name).exists()]
+    if missing:
+        raise SystemExit(f"{folder} lacks {', '.join(missing)}: run build first.")
+    target = Path(args.to) / folder.name
+    target.mkdir(parents=True, exist_ok=True)
+    config = json.loads((folder / "config.json").read_text())
+    config["hub_repo"] = args.repo
+    config["weights_sha256"] = sha256(folder / "model.safetensors")
+    (target / "config.json").write_text(json.dumps(config, indent=1))
+    shutil.copy(folder / "metrics.json", target / "metrics.json")
+    card = (folder / "README.md").read_text()
+    if card.startswith("---\n"):
+        card = card[card.index("\n---\n", 4) + 5:].lstrip("\n")
+    start, end = card.index("## Use\n"), card.index("**Input:**")
+    size = (folder / "model.safetensors").stat().st_size / 1e6
+    card = card[:start] + GITHUB_USE.format(name=folder.name, repo=args.repo, size=size) + card[end:]
+    (target / "README.md").write_text(card)
+    stray = target / "model.safetensors"
+    print(f"Wrote {target}: config.json, metrics.json and README.md. The weights stay on the Hub"
+          + (f"; {stray} is a local copy, kept out of git by .gitignore." if stray.exists() else "."))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("build", "upload", "check"):
+    for name in ("build", "upload", "check", "export"):
         command = sub.add_parser(name)
         command.add_argument("--spec", default="unet_r34", choices=sorted(RELEASE))
         command.add_argument("--repo", default="neet1797/burn2scar-unet-r34", help="Hugging Face model repo")
@@ -272,8 +323,10 @@ def main():
         if name == "build":
             command.add_argument("--results", default="results")
             command.add_argument("--split", default="split")
+        if name == "export":
+            command.add_argument("--to", default="models", help="folder of the code repository that holds the models")
     args = parser.parse_args()
-    {"build": run_build, "upload": run_upload, "check": run_check}[args.command](args)
+    {"build": run_build, "upload": run_upload, "check": run_check, "export": run_export}[args.command](args)
 
 
 if __name__ == "__main__":

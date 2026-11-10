@@ -1,12 +1,12 @@
-sentinelhub
-eo-learn
-geopandas
-pyogrio
-rasterio
-numpy
-pandas<3          # eo-learn needs geopandas 0.14, which fails on pandas 3
-setuptools<81     # eo-learn's fs dependency needs pkg_resources
-omnicloudmask
-huggingface_hub
-python-dotenv
-pyyaml
+# Use burn2scar: read the tiles, run the baseline model, open the notebooks.
+#   pip install -r requirements.txt
+# Lower bounds only. environment/ holds the exact environments behind the paper.
+numpy>=1.26
+pandas>=2.2
+rasterio>=1.4
+matplotlib>=3.9
+torch>=2.4
+segmentation-models-pytorch>=0.5
+safetensors>=0.4
+huggingface_hub>=0.30
+jupyterlab>=4.2

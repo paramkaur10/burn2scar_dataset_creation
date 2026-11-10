@@ -1,0 +1,47 @@
+{
+ "seed": 7,
+ "tiles": [
+  {
+   "tile_id": "effis_217338/2023-08-25T09-59-10",
+   "country": "IT",
+   "window": "fresh",
+   "age_days": 37.41,
+   "split": "train"
+  },
+  {
+   "tile_id": "effis_45163/2020-11-22T11-20-42",
+   "country": "ES",
+   "window": "fresh",
+   "age_days": 33.95,
+   "split": "val"
+  },
+  {
+   "tile_id": "effis_562095/2026-07-27T10-38-33",
+   "country": "FR",
+   "window": "fresh",
+   "age_days": 6.97,
+   "split": "train"
+  },
+  {
+   "tile_id": "effis_278641/2025-09-22T09-39-38",
+   "country": "EL",
+   "window": "fresh",
+   "age_days": 41.96,
+   "split": "val"
+  },
+  {
+   "tile_id": "effis_255295/2025-10-06T10-59-18",
+   "country": "FR",
+   "window": "old",
+   "age_days": 228.93,
+   "split": "train"
+  },
+  {
+   "tile_id": "effis_278709/2025-12-29T09-49-43",
+   "country": "IT",
+   "window": "old",
+   "age_days": 136.89,
+   "split": "val"
+  }
+ ]
+}
