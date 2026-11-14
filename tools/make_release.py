@@ -6,6 +6,9 @@ final. A token with only the deposit:write scope can't publish, so create it tha
 
   python tools/make_release.py plan
   python tools/make_release.py draft --creator "Family, Given"
+  python tools/make_release.py newversion                 # version 4.0: a new version of the published record
+  python tools/make_release.py upload --only ages
+  python tools/make_release.py upload --remove old_file.csv
   python tools/make_release.py upload --only masks
   python tools/make_release.py upload --only images
   python tools/make_release.py upload --only index
@@ -20,6 +23,10 @@ Each zip is built, uploaded, checked against Zenodo's checksum, then deleted, so
 disk at a time. Safe to stop and restart. Finished image zips are skipped. Masks and index are
 rebuilt each time and only uploaded if they changed, replacing the old file in the draft.
 Tiles with no split are left out. The token comes from ZENODO_TOKEN or ~/.zenodo_token.
+
+newversion makes a draft of the next version of the record in zenodo.json (the published one) and keeps the old
+details as zenodo_<id>.json. The image zips are unchanged since version 1.0; if the new draft does not hold the earlier
+files, use "Import files" on its page, and the upload then skips every zip that is already there.
 """
 import argparse
 import hashlib
@@ -70,6 +77,8 @@ def description(frame):
     return (f"Sentinel-2 Level-1C imagery (13 bands on a 10 m grid, 256 by 256 pixels) paired with burn-scar segmentation masks "
             f"for {frame['fire_id'].nunique():,} EFFIS fires in {names}, {first} to {last}: {len(frame):,} tiles. "
             "Mask classes: clear, fresh burn, old burn, older burn, cloud, cloud shadow, water, no data. "
+            "Beside each mask, a days-since-fire raster (ages.zip). burn_evidence.csv gives every fire's dNBR burn evidence, "
+            "and reviewed_points.csv the two-reviewer review of random points. "
             "Unzip all files into one folder. index.csv lists every tile. "
             f"Contains modified Copernicus Sentinel data {first}-{last}. Contains modified Copernicus Service information {first}-{last}. "
             f"Burn labels adapted from EFFIS, Copernicus Emergency Management Service, (c) European Union, 1995-{last}, CC BY 4.0.")
@@ -99,6 +108,12 @@ def plan(args):
     rows.append(("masks.zip", len(masks), size))
     total += size
     missing += lost
+    if "age_path" in frame:
+        ages = sorted(frame["age_path"].dropna())
+        size, lost = sizes(ages, args.masks_root)
+        rows.append(("ages.zip", len(ages), size))
+        total += size
+        missing += lost
     for name, count, size in rows:
         say(f"  {name:24s} {count:6,} files {size / GB:7.2f} GB")
     say(f"Zips: {len(rows)}, {total / GB:.2f} GB. Zenodo allows {MAX_FILES} files and {MAX_BYTES / GB:.0f} GB per record.")
@@ -278,6 +293,42 @@ def draft(args):
     say("Nothing is public until you press Publish on that page.")
 
 
+def newversion(args):
+    path = Path(args.out_parent) / "zenodo.json"
+    if not path.exists():
+        raise SystemExit(f"No {path}: the details of the published record are needed to make a new version of it.")
+    state = json.loads(path.read_text())
+    if state.get("version_of"):
+        say(f"There is already a new-version draft: {state['base']}/uploads/{state['id']}")
+        return
+    frame, _ = load_index(args.index)
+    api = Zenodo(state["base"], state["id"])
+    reply = api.check(api.session.post(f"{api.base}/api/deposit/depositions/{state['id']}/actions/newversion", timeout=120),
+                      "Making a new version").json()
+    latest = reply.get("links", {}).get("latest_draft")
+    if not latest:
+        raise SystemExit(f"Zenodo gave no link to the new draft: {str(reply)[:400]}")
+    draft_reply = api.check(api.session.get(latest, timeout=120), "Reading the new draft").json()
+    api.depo, api.bucket = draft_reply["id"], draft_reply.get("links", {}).get("bucket")
+    metadata = {k: v for k, v in draft_reply.get("metadata", {}).items() if k not in ("doi", "prereserve_doi")}
+    metadata.update(version=args.version, publication_date=datetime.now(timezone.utc).date().isoformat(), description=description(frame))
+    answer = api.set_metadata(metadata)
+    if answer.status_code >= 400:
+        say(f"Zenodo didn't take the version number, date and description (HTTP {answer.status_code}); set them on the draft page.\n{answer.text[:400]}")
+    if not api.bucket:
+        api.bucket = api.get().get("links", {}).get("bucket")
+    new_state = {"base": api.base, "id": api.depo, "bucket": api.bucket, "version_of": state["id"], "version": args.version,
+                 "doi": (draft_reply.get("metadata", {}).get("prereserve_doi") or {}).get("doi"),
+                 "created": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    path.rename(path.with_name(f"zenodo_{state['id']}.json"))
+    path.write_text(json.dumps(new_state, indent=2))
+    held = api.files()
+    say(f"New-version draft: {api.base}/uploads/{api.depo}")
+    say(f"It holds {len(held)} files of the earlier version."
+        + ("" if held else " Use 'Import files' on the draft page to bring them over, then run status."))
+    say("Nothing is public until you press Publish on that page.")
+
+
 def upload(args):
     state, _ = load_state(args)
     try:
@@ -333,6 +384,13 @@ def upload(args):
         remember(name, md5, path.stat().st_size, 1)
         say(f"  {name}: done and checked")
 
+    for name in args.remove or []:
+        if name in remote:
+            api.delete(name, remote[name][2])
+            say(f"  {name}: removed from the draft")
+        else:
+            say(f"  {name}: not in the draft")
+    remote = api.files()
     if args.only == "images":
         bundles = image_bundles(frame)
         for number, (name, paths) in enumerate(bundles.items(), 1):
@@ -340,6 +398,10 @@ def upload(args):
             zip_and_send(name, paths, args.images_root, final=True)
     elif args.only == "masks":
         zip_and_send("masks.zip", sorted(frame["mask_path"]), args.masks_root, final=False)
+    elif args.only == "ages":
+        if "age_path" not in frame:
+            raise SystemExit("The index has no age_path column: run make_age.py with --index first.")
+        zip_and_send("ages.zip", sorted(frame["age_path"].dropna()), args.masks_root, final=False)
     elif args.only == "index":
         target = out / "index.csv"
         frame.to_csv(target, index=False)
@@ -357,7 +419,7 @@ def status(args):
     state, _ = load_state(args)
     frame, _ = load_index(args.index)
     remote = Zenodo(state["base"], state["id"], state["bucket"]).files()
-    wanted = [*image_bundles(frame), "masks.zip", "index.csv"]
+    wanted = [*image_bundles(frame), "masks.zip", "index.csv", *(["ages.zip"] if "age_path" in frame else [])]
     total = sum(entry[1] or 0 for entry in remote.values())
     say(f"Draft: {state['base']}/uploads/{state['id']}\nReserved DOI: {state.get('doi')}")
     say(f"In the draft: {len(remote)} files, {total / GB:.2f} GB")
@@ -372,18 +434,19 @@ def status(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["plan", "draft", "upload", "status"])
-    parser.add_argument("--index", default="data/v2/index.csv")
+    parser.add_argument("command", choices=["plan", "draft", "newversion", "upload", "status"])
+    parser.add_argument("--index", default="data/v4/index.csv")
     parser.add_argument("--images-root", default="data/v1")
-    parser.add_argument("--masks-root", default="data/v2")
+    parser.add_argument("--masks-root", default="data/v4", help="also holds the age rasters")
     parser.add_argument("--out-parent", default="data/release", help="the draft's details and, briefly, each zip")
     parser.add_argument("--base", default="https://zenodo.org", help="https://sandbox.zenodo.org to try things out, with its own token")
     parser.add_argument("--creator", help='as "Family, Given"')
     parser.add_argument("--affiliation", default="")
     parser.add_argument("--orcid", default="")
-    parser.add_argument("--version", default="2.0")
+    parser.add_argument("--version", default="4.0")
     parser.add_argument("--new", action="store_true", help="make another draft even though one exists")
-    parser.add_argument("--only", choices=["images", "masks", "index"])
+    parser.add_argument("--only", choices=["images", "masks", "ages", "index"])
+    parser.add_argument("--remove", nargs="+", help="files to take out of the draft, such as the first review's files")
     parser.add_argument("--files", nargs="+", help="small files to add as they are, such as README.md")
     parser.add_argument("--min-free-gb", type=float, default=15)
     parser.add_argument("--retries", type=int, default=5)
@@ -392,10 +455,10 @@ def main():
     Path(args.out_parent).mkdir(parents=True, exist_ok=True)
     if args.command == "draft" and not args.creator and not (Path(args.out_parent) / "zenodo.json").exists():
         parser.error('draft needs --creator "Family, Given"')
-    if args.command == "upload" and not (args.only or args.files):
-        parser.error("upload needs --only images, masks or index, or --files")
+    if args.command == "upload" and not (args.only or args.files or args.remove):
+        parser.error("upload needs --only images, masks, ages or index, --files, or --remove")
     try:
-        {"plan": plan, "draft": draft, "upload": upload, "status": status}[args.command](args)
+        {"plan": plan, "draft": draft, "newversion": newversion, "upload": upload, "status": status}[args.command](args)
     except (TryAgain, OSError) as error:  # Network errors from requests are OSErrors too.
         raise SystemExit(f"{str(error)[:300]}\nCouldn't finish. Nothing is lost: run the same command again in a while.")
 

@@ -18,6 +18,11 @@ old burn together. With --target fresh, burnt is fresh burn only and old burn co
 unburnt, as an alert for new fires needs. Cloud, shadow, older_burn and nodata pixels are
 left out. Classifier evaluation uses a regular 1-in-16 pixel grid to keep prediction
 time reasonable; index evaluation uses every pixel.
+
+Classifiers are trained on balanced pixels but tested on a 7 % burn prior, so a 0.5 cut on
+their probability gives many false alarms. Each classifier's probability threshold is
+therefore chosen on the validation set to maximise burnt F1, as the index thresholds are
+chosen on the training set. metrics.json records the threshold and the scores at 0.5.
 """
 import argparse
 import json
@@ -274,13 +279,32 @@ def make_classifier(method, seed, args):
     raise ValueError(method)
 
 
-def evaluate_classifier(model, paths, stride, pool, tiles_per_batch=256):
-    """One confusion matrix per tile. Predicts in batches of tiles, which is far faster than tile by tile."""
+def burn_probability(model, x):
+    """Probability of the burnt class, from predict_proba or, for the SVM, from the decision function."""
+    if hasattr(model, "predict_proba"):
+        return model.predict_proba(x)[:, 1]
+    score = model.decision_function(x)
+    return 1 / (1 + np.exp(-score))
+
+
+def evaluate_classifier(model, paths, stride, pool, threshold=0.5, tiles_per_batch=256, keep=False):
+    """One confusion matrix per tile at the given threshold. Predicts in batches of tiles, which is far faster than tile by tile.
+
+    With keep=True, also returns every pixel's burn probability and label, for choosing a threshold.
+    """
     matrices = []
     features_batch, labels_batch = [], []
+    kept_p, kept_y = [], []
 
     def flush():
-        predictions = model.predict(np.concatenate(features_batch)) if sum(map(len, features_batch)) else np.empty(0)
+        if sum(map(len, features_batch)):
+            probability = burn_probability(model, np.concatenate(features_batch)).astype(np.float32)
+            predictions = (probability >= threshold).astype(np.int64)
+            if keep:
+                kept_p.append(probability)
+                kept_y.append(np.concatenate(labels_batch).astype(np.uint8))
+        else:
+            predictions = np.empty(0, np.int64)
         start = 0
         for truth in labels_batch:
             predicted = predictions[start:start + len(truth)].astype(np.int64)
@@ -296,7 +320,23 @@ def evaluate_classifier(model, paths, stride, pool, tiles_per_batch=256):
         if len(labels_batch) >= tiles_per_batch:
             flush()
     flush()
+    if keep:
+        return np.stack(matrices), np.concatenate(kept_p), np.concatenate(kept_y)
     return np.stack(matrices)
+
+
+def best_threshold(probability, labels, bins=97):
+    """The probability cut with the highest burnt F1, from a grid of 0.02 to 0.98."""
+    best = (0.5, -1.0)
+    for threshold in np.linspace(0.02, 0.98, bins):
+        predicted = probability >= threshold
+        tp = int((predicted & (labels == 1)).sum())
+        fp = int((predicted & (labels == 0)).sum())
+        fn = int((~predicted & (labels == 1)).sum())
+        f1 = 2 * tp / (2 * tp + fp + fn) if tp else 0.0
+        if f1 > best[1]:
+            best = (float(threshold), f1)
+    return best
 
 
 def run_classifier(method, seed, args, paths, ids, pool):
@@ -310,10 +350,17 @@ def run_classifier(method, seed, args, paths, ids, pool):
     print(f"{method} seed {seed}: fitting on {len(y):,} pixels", flush=True)
     model = make_classifier(method, seed, args)
     model.fit(x, y.astype(np.int64))
-    val = evaluate_classifier(model, paths["val"], args.eval_stride, pool).sum(0)
-    test = evaluate_classifier(model, paths["test"], args.eval_stride, pool)
-    save_run(args.out, method, "pixel", args.split_col, seed, {"training_pixels": int(len(y)), "eval_stride": args.eval_stride},
-             val, test, ids["test"], started)
+    val_fixed, probability, labels = evaluate_classifier(model, paths["val"], args.eval_stride, pool, 0.5, keep=True)
+    threshold, val_f1 = best_threshold(probability, labels)
+    del probability, labels
+    print(f"{method} seed {seed}: threshold {threshold:.2f} gives validation burnt F1 {val_f1:.4f} "
+          f"(0.5 gives {two_class_metrics(val_fixed.sum(0))['burnt_f1']:.4f})", flush=True)
+    val = evaluate_classifier(model, paths["val"], args.eval_stride, pool, threshold).sum(0)
+    test = evaluate_classifier(model, paths["test"], args.eval_stride, pool, threshold)
+    test_fixed = evaluate_classifier(model, paths["test"], args.eval_stride, pool, 0.5).sum(0)
+    extra = {"training_pixels": int(len(y)), "eval_stride": args.eval_stride, "threshold": threshold,
+             "val_at_0.5": two_class_metrics(val_fixed.sum(0)), "test_at_0.5": two_class_metrics(test_fixed)}
+    save_run(args.out, method, "pixel", args.split_col, seed, extra, val, test, ids["test"], started)
 
 
 def main():

@@ -1,5 +1,5 @@
 effis_path: effis/5fbf994ef5774ab882bf7239ec8b32f5.zip
-effis_extra: []
+effis_extra: [effis/d62d070a5471471893420649e93217c7.zip]
 countries: [IT, FR, ES, EL]
 start_date: "2020-01-01"
 end_date: "2026-08-04"

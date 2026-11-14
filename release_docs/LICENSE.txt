@@ -8,7 +8,7 @@ Part                                          Terms
 --------------------------------------------  ---------------------------------
 Authors' contributions (section 1)            CC BY 4.0
 Sentinel-2 imagery, water class (section 2)   Copernicus Sentinel legal notice
-Burn classes, EFFIS export (section 3)        CC BY 4.0, from EFFIS
+Burn classes, age rasters, EFFIS exports (3)  CC BY 4.0, from EFFIS
 Cloud and shadow classes (section 4)          OmniCloudMask output (MIT software)
 
 
@@ -25,6 +25,9 @@ licensed under the Creative Commons Attribution 4.0 International licence
     water, and the way the layers in *_mask.tif are combined
   - the index file, including its splits and tile attributes
   - the reviewed points
+  - the burn evidence tables (burn_evidence*.csv), computed from Copernicus
+    Sentinel-2 L2A data inside EFFIS perimeters; the Copernicus and EFFIS
+    terms of sections 2 and 3 apply to the data they are computed from
   - the compilation of the dataset as a whole
   - the dataset card, documentation and figures
 
@@ -52,7 +55,8 @@ Anyone who distributes this data or makes it public must include this notice:
 
 3. Burn classes and the EFFIS export
 
-The fresh burn, old burn and older burn classes in *_mask.tif are adapted from
+The fresh burn, old burn and older burn classes in *_mask.tif, and the
+days-since-fire rasters (*_age.tif), are adapted from
 burnt-area perimeters published by the European Forest Fire Information System
 (EFFIS) of the Copernicus Emergency Management Service.
 
@@ -71,15 +75,17 @@ Changes made to the EFFIS data:
     would otherwise be clear)
   - burned pixels were merged with the other mask classes, with cloud, cloud
     shadow and nodata taking priority over burn, and burn over water
+  - for each pixel, the days from the most recent perimeter covering it to
+    the acquisition were written to *_age.tif
 
-The Zenodo record also holds the EFFIS export that the burn classes were made
-from (effis_export_2026-08-04.zip), unchanged and with its own readme. Its
-terms are the EFFIS terms above.
+The Zenodo record also holds the EFFIS exports that the burn classes were made
+from (effis_export_2026-08-04.zip and effis_perimeters_2018-2026.zip),
+unchanged and with their own readme. Their terms are the EFFIS terms above.
 
 As a cautious measure, because EFFIS is a Copernicus service, distributions
 should also include this notice:
 
-  Contains modified Copernicus Service information 2020-2026.
+  Contains modified Copernicus Service information 2018-2026.
 
 
 4. Cloud and cloud shadow classes
@@ -119,5 +125,5 @@ has endorsed this dataset or its authors.
 8. Requests (not licence conditions)
 
 If you publish work or a model that uses this dataset, please cite it as shown
-in README.md (https://doi.org/10.5281/zenodo.23986827) and include the notices
+in README.md (all versions: https://doi.org/10.5281/zenodo.23986827) and include the notices
 from NOTICE.txt in your documentation.

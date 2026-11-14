@@ -14,6 +14,13 @@ on the validation set, and burnt-class metrics treat fresh and old burn as one c
 Pixels labelled nodata or older_burn are ignored in training and evaluation. Pixels
 labelled cloud or shadow are also left out of the burnt-class metrics, because the
 ground under them can't be seen.
+
+--bands trains on a subset of the 13 bands, for sensors without shortwave infrared:
+  all      the 13 bands (default)
+  vnir     B02 B03 B04 B05 B06 B07 B08 B8A, the visible, red-edge and near-infrared bands at 10 and 20 m
+  rgbnir   B02 B03 B04 B08, the four 10 m bands
+  or any comma-separated list, e.g. --bands B02,B03,B04,B05,B08
+A subset run is named <spec>_<bands> in its metrics, so summarize_results.py keeps it apart.
 """
 import argparse
 import json
@@ -32,6 +39,18 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 IGNORE = 255
+ALL_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12"]
+BAND_SETS = {"all": ALL_BANDS, "vnir": ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A"],
+             "rgbnir": ["B02", "B03", "B04", "B08"]}
+
+
+def band_indices(bands):
+    """Channel numbers of a band set name or a comma-separated list."""
+    names = BAND_SETS.get(bands) or [b.strip() for b in bands.split(",")]
+    unknown = [b for b in names if b not in ALL_BANDS]
+    if unknown:
+        raise SystemExit(f"Unknown bands: {', '.join(unknown)}. Bands: {', '.join(ALL_BANDS)}")
+    return [ALL_BANDS.index(b) for b in names], names
 TASKS = {
     "multiclass": {"classes": ["clear", "fresh_burn", "old_burn", "cloud", "shadow", "water"],
                    "values": {0: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5}, "burnt": [1, 2], "unburnt": [0, 5]},
@@ -66,7 +85,7 @@ def read_image(path):
 
 
 class Tiles(Dataset):
-    def __init__(self, frame, images_root, masks_root, task, mean, std, crop=0, cache_root=""):
+    def __init__(self, frame, images_root, masks_root, task, mean, std, crop=0, cache_root="", channels=None):
         if cache_root:  # Plain NumPy files from build_cache.py, far quicker to read.
             self.images = [Path(cache_root) / f"{p}.npy" for p in frame["image_path"]]
             self.masks = [Path(cache_root) / f"{p}.npy" for p in frame["mask_path"]]
@@ -75,7 +94,8 @@ class Tiles(Dataset):
             self.masks = [Path(masks_root) / p for p in frame["mask_path"]]
         self.cached = bool(cache_root)
         self.table, self.crop = label_table(task), crop
-        self.mean, self.std = mean[:, None, None], std[:, None, None]
+        self.channels = channels if channels is not None else list(range(13))
+        self.mean, self.std = mean[self.channels][:, None, None], std[self.channels][:, None, None]
 
     def __len__(self):
         return len(self.images)
@@ -93,7 +113,7 @@ class Tiles(Dataset):
             top, left = random.randint(0, size - self.crop), random.randint(0, size - self.crop)
             image = image[:, top:top + self.crop, left:left + self.crop]
             mask = mask[top:top + self.crop, left:left + self.crop]
-        image = np.clip(np.asarray(image, dtype=np.float32) / 10000.0, 0, 1.5)
+        image = np.clip(np.asarray(image, dtype=np.float32)[self.channels] / 10000.0, 0, 1.5)
         label = self.table[np.asarray(mask)]
         if self.crop:
             if random.random() < .5:
@@ -137,10 +157,10 @@ def band_stats(frame, images_root, cache, key):
     return mean.astype(np.float32), std.astype(np.float32)
 
 
-def build_model(spec, classes):
+def build_model(spec, classes, in_channels=13):
     architecture = getattr(smp, spec["arch"])
     weights = spec["weights"] if spec["weights"] in ("imagenet",) else None
-    model = architecture(encoder_name=spec["encoder"], encoder_weights=weights, in_channels=13, classes=classes)
+    model = architecture(encoder_name=spec["encoder"], encoder_weights=weights, in_channels=in_channels, classes=classes)
     if spec["weights"] == "ssl4eo":
         # SSL4EO-S12 MoCo weights, the same file torchgeo uses for SENTINEL2_ALL_MOCO. Licence: CC BY 4.0.
         from huggingface_hub import hf_hub_download
@@ -219,7 +239,9 @@ def learning_rate(step, warmup, total):
 
 def train(args):
     spec = SPECS[args.spec]
-    run_name = f"{args.spec}__{args.split_col}__{args.task}__seed{args.seed}"
+    channels, band_names = band_indices(args.bands)
+    model_name = args.spec if args.bands == "all" else f"{args.spec}_{args.bands.replace(',', '-')}"
+    run_name = f"{model_name}__{args.split_col}__{args.task}__seed{args.seed}"
     run_dir = Path(args.out) / run_name
     if (run_dir / "metrics.json").exists():
         print(f"{run_name}: already finished")
@@ -249,13 +271,13 @@ def train(args):
 
     batch = args.batch_size or max(int(spec["batch"] * args.batch_scale), 2)
     def make_loader(frame, training):
-        data = Tiles(frame, args.images_root, args.masks_root, args.task, mean, std, args.crop if training else 0, args.cache_root)
+        data = Tiles(frame, args.images_root, args.masks_root, args.task, mean, std, args.crop if training else 0, args.cache_root, channels)
         return DataLoader(data, batch_size=batch if training else batch * 2, shuffle=training, drop_last=training and len(frame) > batch,
                           num_workers=args.workers, pin_memory=amp, persistent_workers=args.workers > 0,
                           worker_init_fn=seed_worker, generator=torch.Generator().manual_seed(args.seed))
     train_loader, val_loader, test_loader = make_loader(frames["train"], True), make_loader(frames["val"], False), make_loader(frames["test"], False)
 
-    model = build_model(spec, classes).to(device)
+    model = build_model(spec, classes, len(channels)).to(device)
     parameters = sum(p.numel() for p in model.parameters())
     frequency = np.zeros(classes)
     fractions = {"clear": "frac_clear", "fresh_burn": "frac_fresh", "old_burn": "frac_old", "cloud": "frac_cloud",
@@ -312,7 +334,8 @@ def train(args):
     np.savez_compressed(run_dir / "test_tile_confusion.npz", tile_id=frames["test"]["tile_id"].to_numpy(dtype=str),
                         matrices=test_tiles, classes=np.array(info["classes"]))
     result = {
-        "name": args.spec, "kind": "deep", "split": args.split_col, "task": args.task, "seed": args.seed, "spec": spec,
+        "name": model_name, "kind": "deep", "split": args.split_col, "task": args.task, "seed": args.seed, "spec": spec,
+        "bands": band_names,
         "parameters": parameters, "epochs_run": len(history), "best_epoch": int(np.argmax([h["val_burnt_f1"] for h in history]) + 1),
         "minutes": (time.time() - started) / 60, "tiles": {k: len(v) for k, v in frames.items()}, "crop": args.crop,
         "val": summarise_matrix(val_tiles.sum(0), args.task), "test": summarise_matrix(test_tiles.sum(0), args.task),
@@ -343,6 +366,7 @@ def main():
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--device", default="")
     parser.add_argument("--limit", type=int, default=0, help="use only this many tiles per split, for a quick trial")
+    parser.add_argument("--bands", default="all", help="all, vnir, rgbnir, or a comma-separated list of bands")
     train(parser.parse_args())
 
 

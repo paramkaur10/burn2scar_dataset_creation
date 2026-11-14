@@ -45,3 +45,4 @@ __pycache__/
 
 # the land outline the paper figures and the notebook draw, from Natural Earth (public domain)
 !/tools/data/land_med_ne50m.geojson
+review2/

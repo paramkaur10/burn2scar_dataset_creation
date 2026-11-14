@@ -24,8 +24,9 @@ Sentinel-2 Level-1C tiles with burn-scar segmentation masks for 13,895 fires map
 Information System (EFFIS) in Italy, Spain, France south of 46° N and Greece, 2020 to 2026. Real imagery: nothing is
 simulated or degraded.
 
-- **Citable copy, version 3.0:** [doi.org/10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827). Its
-  README has the full documentation and the label-quality numbers with their intervals.
+- **Citable copy, version 4.0:** ⟨FILL: DOI of 4.0⟩ (all versions: [doi.org/10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827)).
+  Its README has the full documentation and the label-quality numbers with their intervals, and the record also holds
+  the burn evidence of every fire, the reviewed points and the EFFIS exports, which are not mirrored here.
 - **Code:** [github.com/paramkaur10/burn2scar_dataset_creation](https://github.com/paramkaur10/burn2scar_dataset_creation)
 
 ## Summary
@@ -33,6 +34,8 @@ simulated or degraded.
 - **26,846 tiles** of 256 × 256 pixels (2.56 km across), all 13 bands on a 10 m grid, top-of-atmosphere reflectance.
 - **Two scenes of most fires** (12,951 of 13,895): one 5 to 60 days after the fire, one 120 to 300 days after.
 - **Masks with seven classes plus no data:** clear, fresh burn, old burn, older burn, water, cloud and cloud shadow.
+- **Days since the fire, per pixel,** beside every mask (new in 4.0), so the age classes can be cut anywhere.
+- **Burn evidence for every fire** in the index (`fire_dnbr_flag`), so you can keep the fires the imagery confirms.
 - **Splits that keep overlapping fires apart**, by area, by year and by country.
 
 | Country | Fires | Tiles |
@@ -44,9 +47,10 @@ simulated or degraded.
 
 ## Versions
 
-The masks and the index here are version 3.0, the same as the Zenodo record. The version 1 masks first published here
-stay available at the `v1` tag of this repository. Version 3.0 takes burn from every EFFIS perimeter in the tile, adds
-the older_burn class and checks water in winter scenes. Images are unchanged.
+The masks, age rasters and index here are version 4.0, the same as the Zenodo record. Earlier masks stay available at
+the `v1` and `v3` tags of this repository. Version 4.0 takes the label history back to 2018, adds the age rasters, and
+adds the burn evidence and quality flags to the index. Version 3.0 had taken burn from every EFFIS perimeter in the
+tile, added the older_burn class and checked water in winter scenes. Images are unchanged since version 1.
 
 ## Files
 
@@ -54,6 +58,7 @@ the older_burn class and checks water in winter scenes. Images are unchanged.
 index.csv                                                           one row per tile
 acquisitions/<fire_id>/<timestamp>/<fire_id>_<timestamp>_s2.tif     image
 acquisitions/<fire_id>/<timestamp>/<fire_id>_<timestamp>_mask.tif   mask
+acquisitions/<fire_id>/<timestamp>/<fire_id>_<timestamp>_age.tif    days from the fire to the scene, 0 where none
 LICENSE.txt, NOTICE.txt                                             terms and notices
 ```
 
@@ -65,13 +70,13 @@ Sentinel Hub in the Copernicus Data Space Ecosystem; the 20 m and 60 m bands wer
 
 | Value | Class | Rule | Share of valid pixels (%) |
 |---:|---|---|---:|
-| 0 | clear | None of the classes below | 77.26 |
-| 2 | fresh_burn | Inside an EFFIS perimeter dated 0 to 90 days before the scene | 7.19 |
-| 3 | old_burn | Inside an EFFIS perimeter dated more than 90 and up to 365 days before the scene | 7.32 |
-| 7 | older_burn | Inside an EFFIS perimeter dated more than 365 days before; only where the pixel would otherwise be clear | 6.24 |
-| 6 | water | NDWI above 0.05, or Scene Classification value 6; in November to February scenes, kept only where the fire's March to October scene agrees | 1.28 |
-| 4 | cloud | OmniCloudMask, thick or thin cloud | 0.54 |
-| 5 | cloud shadow | OmniCloudMask | 0.19 |
+| 0 | clear | None of the classes below | ⟨FILL⟩ |
+| 2 | fresh_burn | Inside an EFFIS perimeter dated 0 to 90 days before the scene | ⟨FILL⟩ |
+| 3 | old_burn | Inside an EFFIS perimeter dated more than 90 and up to 365 days before the scene | ⟨FILL⟩ |
+| 7 | older_burn | Inside an EFFIS perimeter (from 2018 on) dated more than 365 days before; only where the pixel would otherwise be clear | ⟨FILL⟩ |
+| 6 | water | NDWI above 0.05, or Scene Classification value 6; in November to February scenes, kept only where the fire's March to October scene agrees | ⟨FILL⟩ |
+| 4 | cloud | OmniCloudMask, thick or thin cloud | ⟨FILL⟩ |
+| 5 | cloud shadow | OmniCloudMask | ⟨FILL⟩ |
 | 255 | no data | Outside the valid data of the scene | |
 
 Where classes overlap, cloud and shadow win over burn, and burn wins over water.
@@ -94,6 +99,7 @@ with rasterio.open(image_file) as src:
     reflectance = src.read().astype(np.float32) / 10000   # (13, 256, 256)
 with rasterio.open(mask_file) as src:
     mask = src.read(1)                                      # (256, 256)
+days = rasterio.open(hf_hub_download(repo, tile["age_path"], repo_type="dataset")).read(1)   # days since the fire
 ```
 
 `snapshot_download(repo, repo_type="dataset")` fetches everything, about 31 GB. The Zenodo record has the same files
@@ -115,28 +121,20 @@ fire's tile. Values are `train`, `val`, `test`, and `unused` where a tile is lef
 
 ## Label quality
 
+- **Burn evidence for every fire.** The dNBR between a clear pre-fire Sentinel-2 L2A image and the tile's own scene,
+  inside the fire's perimeter against a ring around it, shows a clear burn signal for 78.5 % of the 13,571 assessed
+  fires and at least a weak one for 88.0 %: 67.7 % of fires of 5 to 10 ha, rising to 96.2 % at 500 to 2,000 ha.
+  `fire_dnbr_flag` in the index carries it for every tile.
+- **Two people reviewed 700 random points** from the imagery alone. ⟨FILL after adjudication: overall accuracy, burned
+  precision and recall with intervals, kappa, one line on fresh and old burn.⟩
 - **Against Copernicus EMS rapid mapping** of the same fires (117 areas, 2020 to 2023), EFFIS perimeters agree at
   F1 93.3 %. In 143 tile and EMS map pairs, fresh_burn agrees at F1 88.6 %.
-- **A visual review of 1,050 random pixels** by the first author, from the imagery alone, confirmed the mask class for:
-
-| Mask class | Points | Confirmed (%) |
-|---|---:|---:|
-| fresh_burn | 180 | 65.6 |
-| old_burn | 180 | 24.2 |
-| clear, within 300 m of a burn | 180 | 93.9 |
-| clear, further away | 180 | 97.2 |
-| water | 100 | 92.9 |
-| cloud | 100 | 56.8 |
-| cloud shadow | 100 | 68.1 |
-
-Weighted by area, with fresh and old burn as burned, the review gives the burned class precision 44.7 %, recall
-68.9 % and IoU 37.2 %. The masks mark 15.6 % of that area as burned, the review 10.1 %.
 
 ## Limitations
 
-- **old_burn is a date class**: ground that EFFIS mapped as burned 3 to 12 months before the scene. The scar often
-  can't be seen any more.
-- **fresh_burn is less reliable** for fires of 5 to 30 ha, late in the 60-day window, in winter, and on the edge of a burn.
+- **old_burn is a date class**: ground that EFFIS mapped as burned 3 to 12 months before the scene. Months later,
+  42 % of the perimeters still stand out from the land around them in dNBR; the rest have faded.
+- **fresh_burn is less reliable** for fires of 5 to 30 ha, for autumn and spring fires, and on the edge of a burn.
 - **Burns that EFFIS didn't map are labelled clear**, and EFFIS perimeters can include small unburned patches.
 - **`clear` is what is left**: anything not burn, cloud, shadow or water, including bare soil, rock and volcanic
   ground. Combine it with a land-cover product such as ESA WorldCover if you need a vegetation class.
@@ -168,9 +166,9 @@ and other uses. This is not legal advice. Check the terms for your own use case.
                Ricolfi, Silvia and Meoni, Gabriele and Taramelli, Andrea},
   title     = {burn2scar: a Sentinel-2 burn-scar segmentation data set},
   year      = {2026},
-  version   = {3.0},
+  version   = {4.0},
   publisher = {Zenodo},
-  doi       = {10.5281/zenodo.23986827}
+  doi       = {⟨FILL⟩}
 }
 ```
 
@@ -178,12 +176,12 @@ Please also keep the notices from [NOTICE.txt](NOTICE.txt):
 
 ```
 Contains modified Copernicus Sentinel data 2020-2026.
-Contains modified Copernicus Service information 2020-2026.
+Contains modified Copernicus Service information 2018-2026.
 Burn labels adapted from EFFIS, Copernicus Emergency Management Service,
 © European Union, 1995-2026, CC BY 4.0
 (https://creativecommons.org/licenses/by/4.0/). Changes: perimeters rasterised
-to a 10 m grid, split into fresh, old and older burn classes by date, and
-merged with cloud, cloud shadow and water classes.
+to a 10 m grid, split into fresh, old and older burn classes by date, merged
+with cloud, cloud shadow and water classes, and turned into days-since-fire rasters.
 ```
 
 **Authors:** Parampuneet Kaur Thind, Enrico Cadau, Roberto Del Prete, Silvia Ricolfi, Gabriele Meoni, Andrea Taramelli
