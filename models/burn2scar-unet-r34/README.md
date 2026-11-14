@@ -36,18 +36,18 @@ are no data. Any image size works; predict.py reads it in 256 x 256 windows, the
 
 ## Scores
 
-Test set of burn2scar's spatial split, 5,420 tiles. This model is seed 1, the median of
+Test set of burn2scar's spatial split, 5,420 tiles. This model is seed 2, the median of
 5 seeds by fresh-burn F1. Percent.
 
 | Measure | This model | 5 seeds, mean ± sd |
 |---|---|---|
-| Fresh burn F1 | 81.20 | 80.78 ± 1.17 |
-| Fresh burn precision | 75.27 | 74.26 ± 2.53 |
-| Fresh burn recall | 88.13 | 88.64 ± 1.05 |
-| Fresh burn IoU | 68.34 | 67.77 ± 1.63 |
-| Burnt F1, fresh and old together | 75.30 | 74.85 ± 1.06 |
-| Fresh vs old accuracy | 95.85 | 95.89 ± 0.55 |
-| Mean IoU, six classes | 71.02 | 70.44 ± 1.37 |
+| Fresh burn F1 | 81.66 | 81.23 ± 0.85 |
+| Fresh burn precision | 74.87 | 75.44 ± 1.94 |
+| Fresh burn recall | 89.80 | 88.07 ± 2.28 |
+| Fresh burn IoU | 69.00 | 68.40 ± 1.20 |
+| Burnt F1, fresh and old together | 75.52 | 75.43 ± 0.84 |
+| Fresh vs old accuracy | 96.45 | 96.04 ± 0.46 |
+| Mean IoU, six classes | 70.59 | 70.29 ± 1.43 |
 
 Fresh burn is scored against clear, old_burn and water. "Fresh and old together" scores both burn classes
 against clear and water. Fresh vs old accuracy is the share of pixels labelled and predicted as burn that get
@@ -57,12 +57,12 @@ Per-class IoU of this model, each class against all others:
 
 | Class | IoU |
 |---|---|
-| clear | 89.57 |
-| fresh_burn | 68.21 |
-| old_burn | 46.26 |
-| cloud | 70.70 |
-| shadow | 66.94 |
-| water | 84.44 |
+| clear | 89.15 |
+| fresh_burn | 68.86 |
+| old_burn | 47.41 |
+| cloud | 70.62 |
+| shadow | 64.39 |
+| water | 83.15 |
 
 ## Training
 
@@ -70,7 +70,7 @@ Per-class IoU of this model, each class against all others:
 - Input scaling: reflectance (value / 10,000) clipped to 0 to 1.5, then normalised per band with the mean and standard deviation of 1,000 training tiles (both in config.json).
 - The encoder started from torchvision's ImageNet ResNet-34 weights (BSD-3-Clause), as distributed with segmentation-models-pytorch. The first layer takes 13 bands.
 - Random 192 x 192 crops, flips and 90 degree turns. AdamW, learning rate 3e-4, weight decay 1e-4, batch 32, one warm-up epoch then cosine decay, at most 60 epochs, stopped after 15 without gain. Loss: cross entropy weighted by the inverse square root of class frequency, plus Dice. The kept epoch is the best by validation F1 of fresh and old burn together.
-- This run: 60 epochs, best at epoch 52.
+- This run: 60 epochs, best at epoch 55.
 
 ## Limits
 

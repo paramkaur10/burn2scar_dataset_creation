@@ -1,6 +1,6 @@
 # burn2scar: a Sentinel-2 burn-scar segmentation data set
 
-**Version 4.0** · DOI ⟨FILL: reserved DOI of the 4.0 draft⟩ · all versions: [10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827)  
+**Version 4.0** · DOI [10.5281/zenodo.24221783](https://doi.org/10.5281/zenodo.24221783) · version 3.0: [10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827)  
 Authors: Parampuneet Kaur Thind, Enrico Cadau, Roberto Del Prete, Silvia Ricolfi, Gabriele Meoni, Andrea Taramelli  
 Licence: CC BY 4.0 for the authors' contributions. Third-party data keep their own terms; see `LICENSE.txt`.  
 Code: [github.com/paramkaur10/burn2scar_dataset_creation](https://github.com/paramkaur10/burn2scar_dataset_creation) · Mirror: [huggingface.co/datasets/neet1797/burn2scar](https://huggingface.co/datasets/neet1797/burn2scar)
@@ -10,7 +10,8 @@ in Italy, Spain, France south of 46° N and Greece, from 2020 to 2026. Each tile
 256 × 256 pixels (2.56 km across), a mask with seven classes plus no data (clear, fresh burn, old burn, older burn,
 water, cloud and cloud shadow) and, new in 4.0, a raster of the days since the fire. Most fires have two tiles of the
 same place: one scene 5 to 60 days after the fire, and one 120 to 300 days after. Every fire carries a measure of
-whether its burn shows in the imagery, and a review of 700 random points by two people gives the labels' accuracy.
+whether its burn shows in the imagery. A review of 700 random points by two people is being completed and will be
+added in version 4.1.
 
 | Country | Fires | Two scenes | One scene | Tiles | Smallest fire (ha) | Median fire size (ha) |
 |---|---:|---:|---:|---:|---:|---:|
@@ -32,7 +33,6 @@ Fires by year: 2020 1,721; 2021 2,074; 2022 2,264; 2023 1,998; 2024 1,831; 2025 
 | `index.csv` | One row per tile: paths, dates, location, class shares, splits, source products, quality flags and burn evidence |
 | `burn_evidence.csv` | New: the dNBR burn evidence of every fire, on its fresh-window tile |
 | `burn_evidence_old_window.csv` | New: the same test on the old-window tiles, months after the fire |
-| `reviewed_points.csv`, `review_strata.csv` | New: the two-reviewer review of 700 random points, described under Label quality |
 | `effis_export_2026-08-04.zip` | The EFFIS export the fires were selected from, as downloaded, with its own readme |
 | `effis_perimeters_2018-2026.zip` | New: the EFFIS export from 2018 that supplies the label history, as downloaded |
 | `README.md`, `LICENSE.txt`, `NOTICE.txt` | This file, the terms for each part, and the notices to keep when redistributing |
@@ -80,17 +80,17 @@ with rasterio.open(tile["age_path"]) as src:
 ## Masks
 
 GeoTIFF, one `uint8` band on the image's grid, with a colour table. Shares are of all valid pixels in the 26,846
-masks.
+masks. No data is 0.95 % of all pixels.
 
 | Value | Class | Rule | Share (%) |
 |---:|---|---|---:|
-| 0 | clear | None of the classes below | ⟨FILL⟩ |
-| 2 | fresh_burn | Inside an EFFIS perimeter dated 0 to 90 days before the scene | ⟨FILL⟩ |
-| 3 | old_burn | Inside an EFFIS perimeter dated more than 90 and up to 365 days before the scene | ⟨FILL⟩ |
-| 7 | older_burn | Inside an EFFIS perimeter dated more than 365 days before the scene; only where the pixel would otherwise be clear | ⟨FILL⟩ |
-| 6 | water | NDWI above 0.05, or Scene Classification value 6; checked in winter scenes, see below | ⟨FILL⟩ |
-| 4 | cloud | OmniCloudMask, thick or thin cloud | ⟨FILL⟩ |
-| 5 | cloud shadow | OmniCloudMask | ⟨FILL⟩ |
+| 0 | clear | None of the classes below | 75.23 |
+| 2 | fresh_burn | Inside an EFFIS perimeter dated 0 to 90 days before the scene | 7.19 |
+| 3 | old_burn | Inside an EFFIS perimeter dated more than 90 and up to 365 days before the scene | 7.34 |
+| 7 | older_burn | Inside an EFFIS perimeter dated more than 365 days before the scene; only where the pixel would otherwise be clear | 8.24 |
+| 6 | water | NDWI above 0.05, or Scene Classification value 6; checked in winter scenes, see below | 1.28 |
+| 4 | cloud | OmniCloudMask, thick or thin cloud | 0.54 |
+| 5 | cloud shadow | OmniCloudMask | 0.19 |
 | 255 | no data | Outside the valid data of the scene | |
 
 - **Burn age** is the time from the EFFIS fire date to the scene, worked out for every perimeter that touches the tile,
@@ -167,8 +167,8 @@ group goes whole to one 0.5° block, and blocks go to train, validation or test.
 1. **Fires.** EFFIS burnt-area export of 4 August 2026 for Italy, Spain, Greece and France, fires dated 2020-01-01 to
    2026-08-04: 25,707 perimeters. Kept: 5 to 2,000 ha, and in France south of 46° N, which left 19,443 fires. Fires
    were processed from the largest down: Italy and Greece to 5 ha, Spain to 27 ha and France to 17 ha, where their
-   shares of the build were reached. The data set is therefore every eligible EFFIS fire above those sizes that had a
-   usable scene. 13,895 fires have at least one tile.
+   shares of the build were reached. The data set holds 13,895 of the 13,972 eligible EFFIS fires above those sizes;
+   the build produced no tile for the other 77 (1 in Italy, 26 in Spain, 50 in France).
 2. **Tiles.** A 2.56 km square in the local UTM zone, centred on the perimeter's centroid.
 3. **Scenes.** In each window, Sentinel-2 L2A catalogue dates with under 70 % cloud, up to five, least cloudy first.
    For each candidate, OmniCloudMask finds cloud and shadow, and the first scene with at most 50 % of the burned pixels
@@ -205,11 +205,11 @@ does; it says nothing about burn outside the perimeter.
 
 `fire_dnbr_flag` in the index lets you keep the 10,660 fires with a clear signal, or the 11,947 with at least a weak one.
 
-### Review of random points by two people (`reviewed_points.csv`)
+### Review of random points by two people
 
-⟨FILL after the adjudication, from review2/review_summary.md: design (700 points in two batches, strata and counts,
-two reviewers who are authors, adjudication); the per-class agreement table; the area-weighted burned precision, recall,
-F1 and IoU with intervals; overall accuracy; agreement between the reviewers (kappa); repeat consistency.⟩
+700 random points, drawn from every mask class, are being judged from the imagery by two people independently, with
+disagreements settled by a third. The points, every answer and the area-weighted accuracies will be added in version 4.1
+(`reviewed_points.csv`, `review_strata.csv`). The review published with version 3.0, by one person, is withdrawn.
 
 ### Against Copernicus EMS
 
@@ -244,14 +244,14 @@ area at F1 88.6 % (85.5 to 93.2). EMS maps large events, so this says little abo
   winter water checked; `water_checked`, `product_id` and `processing_baseline` in the index. Version 2 was an internal
   step.
 - **4.0** (this record): label history from 2018 (9,109 masks changed, almost all from clear to older_burn); age
-  rasters; burn evidence for every fire; the first review replaced by a two-reviewer review of 700 points; new index
+  rasters; burn evidence for every fire; the one-person review of 3.0 withdrawn, and a two-reviewer review of 700 points to follow in 4.1; new index
   columns `age_path`, `burn_age_median`, `winter_fire`, `agricultural`, `modis_mapped`, `dnbr_flag`, `dnbr_in_median`,
   `dnbr_contrast` and `fire_dnbr_flag`. Images are unchanged.
 
 ## Citation
 
 Thind, P. K., Cadau, E., Del Prete, R., Ricolfi, S., Meoni, G., and Taramelli, A.: burn2scar: a Sentinel-2
-burn-scar segmentation data set, version 4.0, Zenodo [data set], ⟨FILL: DOI⟩, 2026.
+burn-scar segmentation data set, version 4.0, Zenodo [data set], https://doi.org/10.5281/zenodo.24221783, 2026.
 
 ```bibtex
 @dataset{thind2026burn2scar,
@@ -261,7 +261,7 @@ burn-scar segmentation data set, version 4.0, Zenodo [data set], ⟨FILL: DOI⟩
   year      = {2026},
   version   = {4.0},
   publisher = {Zenodo},
-  doi       = {⟨FILL⟩}
+  doi       = {10.5281/zenodo.24221783}
 }
 ```
 

@@ -1,7 +1,7 @@
 burn2scar
 Copyright 2026 Parampuneet Kaur Thind
 Licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
-Dataset: ⟨FILL: DOI of version 4.0⟩ (all versions: https://doi.org/10.5281/zenodo.23986827)
+Dataset: https://doi.org/10.5281/zenodo.24221783
 Mirror: https://huggingface.co/datasets/neet1797/burn2scar
 Full terms for each part: see LICENSE.txt.
 

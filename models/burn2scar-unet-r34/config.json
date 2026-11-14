@@ -73,9 +73,9 @@
  "training": {
   "data": "burn2scar 3.0, https://doi.org/10.5281/zenodo.23986827",
   "split_column": "split",
-  "seed": 1,
-  "run": "unet_r34__split__multiclass__seed1"
+  "seed": 2,
+  "run": "unet_r34__split__multiclass__seed2"
  },
  "hub_repo": "neet1797/burn2scar-unet-r34",
- "weights_sha256": "1817deccf57a70760196c99766943ae6df6bbc060259c75dec3fb76647c53d12"
+ "weights_sha256": "7ac97fdad67b998f7071474753f05c521c147b24a300bcee6078e0cf06fb3c38"
 }
