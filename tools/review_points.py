@@ -1,38 +1,52 @@
 #!/usr/bin/env python3
-"""Independent check of burn2scar labels: a person judges random pixels from the imagery alone.
+"""Label review, second edition: two people judge random pixels from the imagery alone, blind to the mask.
 
-The design follows Olofsson et al. (2014). Pixels are drawn at random from each map class,
-and the reviewer never sees the mask or EFFIS. Results are weighted by each class's share of
-the dataset, so they estimate accuracy over the whole dataset, not just over the sample.
+Design, after Olofsson et al. (2014) and Stehman and Foody (2019):
+  - Pixels are drawn at random within strata, with every pixel of a stratum equally likely, so the
+    sample has known inclusion probabilities and the scores are estimates for the whole data set.
+  - Strata are the mask classes, with fresh_burn split by days from the fire to the scene (5-20, 20-40,
+    40-60) and clear split by distance to the nearest burn (within 300 m, farther), so the groups the
+    paper reports are designed in, not read off afterwards.
+  - The reviewer sees a window centred on the point, never the whole tile, so the tile centre cannot
+    give the fire away. Up to three dates are shown in time order with their dates only: no caption says
+    which date is the fire, and the mask and the EFFIS perimeter are never shown.
+  - Two reviewers answer every point independently, each in their own random order. Their agreement is
+    reported; where they disagree, a third person adjudicates, and the final label is the agreed or the
+    adjudicated answer.
+  - The score step gives the full error matrix with area-weighted overall, user's and producer's accuracy,
+    with bootstrap intervals that respect the strata, besides the per-class agreement and the groups.
 
-  1. Draw the sample. Reads masks only.
-     python tools/review_points.py sample --index data/v2/index.csv --masks-root data/v2 --out review
+Steps:
 
-  2. Optional, recommended: fetch pre-fire images for the sampled tiles.
-     python tools/fetch_prefire.py --index data/v2/index.csv --points review/points.csv --out data/prefire
+  1. Draw the sample. Reads masks only. 500 points by default; --counts changes any stratum.
+     python tools/review_points.py sample --index data/v3/index.csv --masks-root data/v3 --out review2
 
-  3. Make one picture per point.
-     python tools/review_points.py chips --out review --images-root data/v1 --prefire-root data/prefire
+  2. Fetch a pre-fire image for every sampled fire (Sentinel Hub, about 1 request per fire).
+     python tools/fetch_prefire.py --index data/v3/index.csv --points review2/points.csv --out data/prefire
 
-  4. Review. Your answers are saved on every key press, so you can stop and come back at any time.
-     python tools/review_points.py serve --out review --reviewer param
-     Then on your laptop:  ssh -L 8765:localhost:8765 you@your-server
-     and open http://localhost:8765
+  3. One picture per point.
+     python tools/review_points.py chips --out review2 --index data/v3/index.csv --images-root data/v1 --prefire-root data/prefire
 
-  5. Score. Works at any point: the order is random, so stopping early only widens the intervals.
-     python tools/review_points.py score --out review
+  4. Each reviewer, on their own port, answers every point. Answers save on every key press.
+     python tools/review_points.py serve --out review2 --reviewer param --port 8765
+     python tools/review_points.py serve --out review2 --reviewer silvia --port 8766
+     On the laptop: ssh -L 8765:localhost:8765 you@server, then open http://localhost:8765
 
-  6. Files to publish with the data set: every point with its answer, and the size of each stratum.
-     python tools/review_points.py export --out review
+  5. Adjudicate the disagreements (a third person, or the two together).
+     python tools/review_points.py serve --out review2 --reviewer judge --disagreements param silvia --port 8767
 
-To share the work between two people, each runs serve with --part 1/2 or --part 2/2. The first
---shared points (100 by default) go to both people, which measures how much two reviewers agree.
+  6. Score, at any time; the final label needs both reviewers and the judge.
+     python tools/review_points.py score --out review2 --reviewers param silvia --judge judge
+
+  7. Files for the release.
+     python tools/review_points.py export --out review2 --reviewers param silvia --judge judge
 """
 import argparse
 import csv
 import json
 import threading
 import time
+import zlib
 from concurrent.futures import ProcessPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,68 +58,102 @@ from rasterio.warp import transform as warp_transform
 from scipy.ndimage import distance_transform_edt
 
 MASK_CLEAR, MASK_FRESH, MASK_OLD, MASK_CLOUD, MASK_SHADOW, MASK_WATER, MASK_OLDER = 0, 2, 3, 4, 5, 6, 7
-NEAR_PX = 30  # 300 m. Errors on the edges of scars are the ones that matter most.
-DEFAULT_COUNTS = {"fresh": 300, "old": 300, "clear_near": 300, "clear_far": 300,
-                  "water": 100, "cloud": 100, "shadow": 100, "older": 50}
-ANSWERS = {"1": "burned", "2": "not_burned", "3": "water", "4": "cloud", "5": "shadow", "6": "cant_tell"}
+NEAR_PX = 30                      # 300 m: clear pixels this close to a burn are where edge errors live.
+FRESH_DAY_BINS = ((5, 20), (20, 40), (40, 61))   # days from the fire to the scene; the last bin takes 60.5
+STRATA = ["fresh_early", "fresh_mid", "fresh_late", "old", "clear_near", "clear_far", "water", "cloud", "shadow", "older"]
+DEFAULT_COUNTS = {"fresh_early": 50, "fresh_mid": 50, "fresh_late": 50, "old": 100, "clear_near": 75, "clear_far": 75,
+                  "water": 35, "cloud": 35, "shadow": 30, "older": 0}
+MAP_CLASS = {"fresh_early": "burned", "fresh_mid": "burned", "fresh_late": "burned", "old": "burned",
+             "clear_near": "not_burned", "clear_far": "not_burned", "water": "water", "cloud": "cloud", "shadow": "shadow",
+             "older": "older_burn"}   # older_burn is right when the place had burned (any burned answer)
+
+
+def expected(map_class):
+    """The reference answer that agrees with a map class."""
+    return "burned" if map_class == "older_burn" else map_class
+REF_CLASSES = ["burned", "not_burned", "water", "cloud", "shadow"]
+ANSWERS = {"1": "burned", "2": "burned_before", "3": "not_burned", "4": "water", "5": "cloud", "6": "shadow", "7": "cant_tell"}
+BURNED_ANSWERS = ("burned", "burned_before")
 BAND = {name: i for i, name in enumerate(
     ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12"])}
 FALSE_COLOUR = (("B12", .40), ("B8A", .50), ("B04", .28))
 TRUE_COLOUR = (("B04", .28), ("B03", .28), ("B02", .32))
-PANEL, ZOOM_HALF = 320, 32
+PANEL, ZOOM_HALF, CONTEXT_HALF = 320, 32, 96    # 640 m and 1.92 km windows, both centred on the point
+FILL = (40, 40, 44)
 
 
 # ---------------------------------------------------------------------- sample
 
-def strata_of(mask):
-    """Boolean mask per stratum. Near and far clear split on distance to any burn in the tile."""
+def strata_of(mask, age_days):
+    """Boolean mask per stratum for one tile. The fresh bins depend on the tile's days from the fire."""
     burn = np.isin(mask, [MASK_FRESH, MASK_OLD])
     clear = mask == MASK_CLEAR
-    if burn.any():
-        near = distance_transform_edt(~burn) <= NEAR_PX
-    else:
-        near = np.zeros(mask.shape, bool)
-    return {"fresh": mask == MASK_FRESH, "old": mask == MASK_OLD, "clear_near": clear & near,
-            "clear_far": clear & ~near, "water": mask == MASK_WATER, "cloud": mask == MASK_CLOUD,
-            "shadow": mask == MASK_SHADOW, "older": mask == MASK_OLDER}
+    near = distance_transform_edt(~burn) <= NEAR_PX if burn.any() else np.zeros(mask.shape, bool)
+    fresh = mask == MASK_FRESH
+    out = {name: np.zeros(mask.shape, bool) for name in ("fresh_early", "fresh_mid", "fresh_late")}
+    for name, (low, high) in zip(("fresh_early", "fresh_mid", "fresh_late"), FRESH_DAY_BINS):
+        if low <= age_days < high:
+            out[name] = fresh
+    out.update({"old": mask == MASK_OLD, "clear_near": clear & near, "clear_far": clear & ~near,
+                "water": mask == MASK_WATER, "cloud": mask == MASK_CLOUD, "shadow": mask == MASK_SHADOW,
+                "older": mask == MASK_OLDER})
+    return out
 
 
-def _count_tile(path):
+def _count_tile(job):
+    path, age_days = job
     with rasterio.open(path) as src:
         mask = src.read(1)
-    return {name: int(chosen.sum()) for name, chosen in strata_of(mask).items()}
+    return {name: int(chosen.sum()) for name, chosen in strata_of(mask, age_days).items()}
 
 
 def _pick_point(job):
-    path, stratum, seed = job
+    path, age_days, stratum, seed = job
     with rasterio.open(path) as src:
         mask, transform, crs = src.read(1), src.transform, src.crs
-    rows, cols = np.nonzero(strata_of(mask)[stratum])
+    rows, cols = np.nonzero(strata_of(mask, age_days)[stratum])
     rng = np.random.default_rng(seed)
     pick = int(rng.integers(len(rows)))
     row, col = int(rows[pick]), int(cols[pick])
     x, y = transform * (col + .5, row + .5)
     lon, lat = warp_transform(crs, "EPSG:4326", [x], [y])
-    return {"row": row, "col": col, "lon": round(lon[0], 6), "lat": round(lat[0], 6), "mask_value": int(mask[row, col])}
+    burn = np.isin(mask, [MASK_FRESH, MASK_OLD])
+    # Distance to the edge of the burn, in metres: inside the burn for burn points, to the nearest burn otherwise.
+    if burn[row, col]:
+        edge = distance_transform_edt(burn)[row, col]
+    elif burn.any():
+        edge = distance_transform_edt(~burn)[row, col]
+    else:
+        edge = np.nan
+    return {"row": row, "col": col, "lon": round(lon[0], 6), "lat": round(lat[0], 6),
+            "mask_value": int(mask[row, col]), "edge_m": None if np.isnan(edge) else round(10 * float(edge), 1)}
 
 
 def run_sample(args):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    if (out / "points.csv").exists() and not args.overwrite:
+    previous = None
+    if (out / "points.csv").exists() and args.supplement:
+        previous = pd.read_csv(out / "points.csv", low_memory=False)
+        if "batch" not in previous:
+            previous["batch"] = 1
+    elif (out / "points.csv").exists() and not args.overwrite:
         raise SystemExit(f"{out}/points.csv already exists. A new sample would throw away the old one; "
-                         "pass --overwrite if you really want that.")
+                         "pass --overwrite if you really want that, or --supplement to add a batch.")
     index = pd.read_csv(args.index, low_memory=False)
-    index = index[index["split"].notna()].reset_index(drop=True)  # Tiles with no split aren't in the release.
+    index = index[index["split"].notna()].reset_index(drop=True)   # released tiles only
     paths = [str(Path(args.masks_root) / p) for p in index["mask_path"]]
+    ages = index["age_days"].astype(float).tolist()
     with ProcessPoolExecutor(args.workers) as pool:
-        counts = pd.DataFrame(list(pool.map(_count_tile, paths, chunksize=32)))
+        counts = pd.DataFrame(list(pool.map(_count_tile, zip(paths, ages), chunksize=32)))
     areas = counts.sum()
-    (out / "strata_area.csv").write_text(areas.rename("pixels").rename_axis("stratum").reset_index().to_csv(index=False))
+    areas.rename("pixels").rename_axis("stratum").reset_index().to_csv(out / "strata_area.csv", index=False)
 
-    wanted = dict(DEFAULT_COUNTS)
+    wanted = dict(DEFAULT_COUNTS) if previous is None else {name: 0 for name in STRATA}
     for item in args.counts or []:
         name, number = item.split("=")
+        if name not in wanted:
+            raise SystemExit(f"Unknown stratum {name}. Strata: {', '.join(STRATA)}")
         wanted[name] = int(number)
     rng = np.random.default_rng(args.seed)
     jobs, rows = [], []
@@ -114,38 +162,51 @@ def run_sample(args):
         available = int((weights > 0).sum())
         number = min(number, available)
         if number == 0:
-            print(f"Nothing to sample in {stratum}")
             continue
-        # A tile's chance follows its pixel count, then a uniform pixel, so every pixel is equally likely.
+        # A tile's chance follows its pixel count, then a uniform pixel, so every pixel of the stratum is equally likely.
         chosen = rng.choice(len(index), number, replace=False, p=weights / weights.sum())
         for tile in chosen:
-            jobs.append((paths[tile], stratum, int(rng.integers(2 ** 32))))
-            rows.append({"tile_id": index.at[tile, "tile_id"], "fire_id": index.at[tile, "fire_id"],
-                         "scene_time": index.at[tile, "scene_time"], "image_path": index.at[tile, "image_path"],
-                         "country": index.at[tile, "country"], "window": index.at[tile, "window"],
-                         "fire_year": index.at[tile, "fire_year"], "stratum": stratum,
-                         "land_cover": index.at[tile, "land_cover"] if "land_cover" in index else ""})
+            record = index.iloc[tile]
+            jobs.append((paths[tile], float(record["age_days"]), stratum, int(rng.integers(2 ** 32))))
+            rows.append({"tile_id": record["tile_id"], "fire_id": record["fire_id"], "scene_time": record["scene_time"],
+                         "image_path": record["image_path"], "country": record["country"], "window": record["window"],
+                         "fire_year": record["fire_year"], "fire_date": record.get("fire_date", ""),
+                         "age_days": record["age_days"], "area_ha": record.get("area_ha", np.nan),
+                         "land_cover": record.get("land_cover", ""), "stratum": stratum})
     with ProcessPoolExecutor(args.workers) as pool:
         picks = list(pool.map(_pick_point, jobs, chunksize=8))
     points = pd.DataFrame([{**row, **pick} for row, pick in zip(rows, picks)])
 
-    # Repeats check whether one person answers the same way twice.
+    # A few points shown twice to each reviewer, to measure one person's consistency.
     repeats = points.sample(frac=args.repeat, random_state=args.seed).copy()
     repeats["repeat_of"] = repeats.index
     points["repeat_of"] = -1
     points = pd.concat([points, repeats], ignore_index=False).reset_index(names="source_row")
-    order = rng.permutation(len(points))
-    points = points.iloc[order].reset_index(drop=True)
-    ids = rng.choice(10 ** 6, len(points), replace=False)
-    points.insert(0, "point_id", [f"p{i:06d}" for i in ids])
-    points["position"] = np.arange(len(points))
+    taken = set() if previous is None else set(previous["point_id"])
+    ids = [f"p{i:06d}" for i in rng.permutation(10 ** 6) if f"p{i:06d}" not in taken][:len(points)]
+    points.insert(0, "point_id", ids)
+    points = points.sample(frac=1, random_state=args.seed).reset_index(drop=True)
+    if previous is not None:
+        # A second random draw within the same strata: within each stratum the points stay an equal-probability sample.
+        same = points.merge(previous[["tile_id", "row", "col"]], on=["tile_id", "row", "col"], how="left", indicator=True)["_merge"] == "both"
+        dropped = set(points.loc[same.to_numpy() & (points["repeat_of"] < 0).to_numpy(), "source_row"])
+        points = points[~points["source_row"].isin(dropped) & ~points["repeat_of"].isin(dropped)].copy()
+        base = int(previous["source_row"].max()) + 1
+        points["source_row"] += base
+        points.loc[points["repeat_of"] >= 0, "repeat_of"] += base
+        points["batch"] = int(previous["batch"].max()) + 1
+        points = pd.concat([previous, points], ignore_index=True)
+        print(f"Added batch {points['batch'].max()}: {int((points['batch'] == points['batch'].max()).sum()):,} showings"
+              f"{f', {len(dropped)} duplicates of earlier points dropped' if dropped else ''}.")
+    else:
+        points["batch"] = 1
     points.to_csv(out / "points.csv", index=False)
 
     table = pd.DataFrame({"pixels": areas, "share_%": (100 * areas / areas.sum()).round(3),
                           "points": points[points["repeat_of"] < 0]["stratum"].value_counts()})
     print(table.fillna(0).to_string())
-    minutes = len(points) * 5 / 60
-    print(f"\n{len(points):,} points, {points['tile_id'].nunique():,} tiles, about {minutes / 60:.1f} hours at 5 seconds each.")
+    print(f"\n{len(points):,} showings of {points['source_row'].nunique():,} points in {points['tile_id'].nunique():,} tiles; "
+          f"about {len(points) * 30 / 3600:.1f} hours per reviewer at 30 seconds a point.")
     print(f"Don't open {out}/points.csv before the review: it holds the mask classes.")
 
 
@@ -161,44 +222,36 @@ def compose(image, recipe):
     return np.round(np.stack(channels, -1) * 255).astype(np.uint8)
 
 
-def window_around(row, col, size):
-    half = ZOOM_HALF
-    top = int(np.clip(row - half, 0, size - 2 * half))
-    left = int(np.clip(col - half, 0, size - 2 * half))
-    return top, left
+def crop_centred(rgb, row, col, half):
+    """A (2 half) square with the point at its centre; outside the tile is filled with grey, so the point never moves."""
+    size = rgb.shape[0]
+    out = np.empty((2 * half, 2 * half, 3), np.uint8)
+    out[:] = FILL
+    r0, c0 = row - half, col - half
+    sr0, sc0 = max(r0, 0), max(c0, 0)
+    sr1, sc1 = min(r0 + 2 * half, size), min(c0 + 2 * half, size)
+    out[sr0 - r0:sr1 - r0, sc0 - c0:sc1 - c0] = rgb[sr0:sr1, sc0:sc1]
+    return out
 
 
-def panel_zoom(image, recipe, row, col, font, caption):
+def panel(image, recipe, row, col, half, font, caption):
     from PIL import Image, ImageDraw
-    rgb = compose(image, recipe)
-    top, left = window_around(row, col, rgb.shape[0])
-    crop = rgb[top:top + 2 * ZOOM_HALF, left:left + 2 * ZOOM_HALF]
-    scale = PANEL / (2 * ZOOM_HALF)
-    picture = Image.fromarray(crop).resize((PANEL, PANEL), Image.NEAREST)
+    crop = crop_centred(compose(image, recipe), row, col, half)
+    scale = PANEL / (2 * half)
+    picture = Image.fromarray(crop).resize((PANEL, PANEL), Image.NEAREST if half <= ZOOM_HALF else Image.BILINEAR)
     draw = ImageDraw.Draw(picture)
-    # A hollow square three pixels wide, so the pixel itself stays visible.
-    x0, y0 = (col - left - 1) * scale, (row - top - 1) * scale
-    x1, y1 = (col - left + 2) * scale, (row - top + 2) * scale
+    # A hollow square around the pixel, so the pixel itself stays visible.
+    reach = 1 if half <= ZOOM_HALF else 3
+    x0, y0 = (half - reach) * scale, (half - reach) * scale
+    x1, y1 = (half + 1 + reach) * scale, (half + 1 + reach) * scale
     draw.rectangle([x0 - 1, y0 - 1, x1 + 1, y1 + 1], outline=(0, 0, 0))
     draw.rectangle([x0, y0, x1, y1], outline=(255, 235, 0))
     return with_caption(picture, caption, font)
 
 
-def panel_whole(image, recipe, row, col, font, caption):
-    from PIL import Image, ImageDraw
-    rgb = compose(image, recipe)
-    scale = PANEL / rgb.shape[0]
-    picture = Image.fromarray(rgb).resize((PANEL, PANEL), Image.BILINEAR)
-    draw = ImageDraw.Draw(picture)
-    x, y = (col + .5) * scale, (row + .5) * scale
-    draw.rectangle([x - 11, y - 11, x + 11, y + 11], outline=(0, 0, 0))
-    draw.rectangle([x - 10, y - 10, x + 10, y + 10], outline=(255, 235, 0))
-    return with_caption(picture, caption, font)
-
-
 def panel_blank(font, caption):
     from PIL import Image
-    return with_caption(Image.new("RGB", (PANEL, PANEL), (40, 40, 44)), caption, font)
+    return with_caption(Image.new("RGB", (PANEL, PANEL), FILL), caption, font)
 
 
 def with_caption(picture, caption, font):
@@ -238,37 +291,38 @@ def prefire_for(fire_id):
 
 
 def make_chip(point):
+    """Three dates in time order, captioned by date only, then true colour and two context windows."""
     from PIL import Image
     font = _CHIP["font"]
     row, col = int(point["row"]), int(point["col"])
-    image = read_bands(_CHIP["images_root"] / point["image_path"])
-    date = str(point["scene_time"])[:10]
-
+    this_date = str(point["scene_time"])[:10]
+    dates = [(this_date, read_bands(_CHIP["images_root"] / point["image_path"]), True)]
     pre_path, pre_date = prefire_for(point["fire_id"])
-    pre = read_bands(pre_path) if pre_path else None
-    other_path = _CHIP["other_scene"].get(point["tile_id"])
-    other, other_date = None, ""
-    if other_path:
-        other = read_bands(_CHIP["images_root"] / other_path[0])
-        other_date = other_path[1]
+    if pre_path:
+        dates.append((pre_date, read_bands(pre_path), False))
+    other = _CHIP["other_scene"].get(point["tile_id"])
+    if other:
+        dates.append((other[1], read_bands(_CHIP["images_root"] / other[0]), False))
+    dates.sort(key=lambda d: d[0])
+    this = next(d for d in dates if d[2])
 
-    other_word = ("EARLIER date" if other_date < date else "LATER date") if other_date else ""
-    panels = [
-        panel_zoom(pre, FALSE_COLOUR, row, col, font, f"Before the fire  {pre_date}") if pre is not None else panel_blank(font, "Before the fire: no image"),
-        panel_zoom(image, FALSE_COLOUR, row, col, font, f"THIS DATE  {date}"),
-        panel_zoom(other, FALSE_COLOUR, row, col, font, f"{other_word}  {other_date}") if other is not None else panel_blank(font, "Other date: no image"),
-        panel_zoom(image, TRUE_COLOUR, row, col, font, f"THIS DATE, true colour  {date}"),
-        panel_whole(image, FALSE_COLOUR, row, col, font, f"THIS DATE, whole tile  {date}"),
-        panel_whole(pre, FALSE_COLOUR, row, col, font, f"Before the fire, whole tile  {pre_date}") if pre is not None
-        else (panel_whole(other, FALSE_COLOUR, row, col, font, f"{other_word}, whole tile  {other_date}") if other is not None
-              else panel_blank(font, "")),
-    ]
+    top = [panel(img, FALSE_COLOUR, row, col, ZOOM_HALF, font, f"{'THIS DATE' if is_this else 'Date'}  {date}")
+           for date, img, is_this in dates]
+    while len(top) < 3:
+        top.append(panel_blank(font, "No other image"))
+    earliest = dates[0]
+    bottom = [panel(this[1], TRUE_COLOUR, row, col, ZOOM_HALF, font, f"THIS DATE, true colour  {this[0]}"),
+              panel(this[1], FALSE_COLOUR, row, col, CONTEXT_HALF, font, f"THIS DATE, 1.9 km  {this[0]}"),
+              panel(earliest[1], FALSE_COLOUR, row, col, CONTEXT_HALF, font,
+                    f"{'THIS DATE' if earliest[2] else 'Date'}, 1.9 km  {earliest[0]}")]
+    panels = top + bottom
     width, height = panels[0].size
     sheet = Image.new("RGB", (3 * width + 8, 2 * height + 4), (18, 18, 20))
-    for i, panel in enumerate(panels):
-        sheet.paste(panel, ((i % 3) * (width + 4), (i // 3) * (height + 4)))
+    for i, picture in enumerate(panels):
+        sheet.paste(picture, ((i % 3) * (width + 4), (i // 3) * (height + 4)))
     sheet.save(_CHIP["out"] / "chips" / f"{point['point_id']}.jpg", quality=88)
-    return pre is not None
+    return {"point_id": point["point_id"], "dates_shown": len(dates), "earliest_date": dates[0][0],
+            "prefire_shown": bool(pre_path)}
 
 
 def run_chips(args):
@@ -277,21 +331,23 @@ def run_chips(args):
     (out / "chips").mkdir(exist_ok=True)
     index = pd.read_csv(args.index, low_memory=False)
     other_scene = {}
-    # The same place on another date, nearest in time, helps most with faded scars.
+    # The same place on the fire's other date, nearest in time.
     for _, group in index[index["fire_id"].isin(points["fire_id"])].groupby("fire_id"):
         if len(group) < 2:
             continue
-        for row in group.itertuples():
-            others = group[group["tile_id"] != row.tile_id]
-            gap = (pd.to_datetime(others["scene_time"]) - pd.Timestamp(row.scene_time)).abs()
+        for rec in group.itertuples():
+            others = group[group["tile_id"] != rec.tile_id]
+            gap = (pd.to_datetime(others["scene_time"]) - pd.Timestamp(rec.scene_time)).abs()
             best = others.loc[gap.idxmin()]
-            other_scene[row.tile_id] = (best["image_path"], str(best["scene_time"])[:10])
+            other_scene[rec.tile_id] = (best["image_path"], str(best["scene_time"])[:10])
     records = points.to_dict("records")
     with ProcessPoolExecutor(args.workers, initializer=_init_chips,
                              initargs=(args.images_root, args.prefire_root, out, other_scene)) as pool:
-        with_prefire = list(pool.map(make_chip, records, chunksize=8))
+        shown = pd.DataFrame(list(pool.map(make_chip, records, chunksize=8)))
+    shown.to_csv(out / "chips_shown.csv", index=False)
     size = sum(p.stat().st_size for p in (out / "chips").glob("*.jpg")) / 1e6
-    print(f"{len(records):,} pictures in {out}/chips, {size:,.0f} MB. {sum(with_prefire):,} show a pre-fire image.")
+    print(f"{len(records):,} pictures in {out}/chips, {size:,.0f} MB. {int(shown['prefire_shown'].sum()):,} show a pre-fire image; "
+          f"dates shown: {shown['dates_shown'].value_counts().sort_index().to_dict()}.")
 
 
 # ----------------------------------------------------------------------- serve
@@ -314,23 +370,25 @@ button { background: #26262b; color: inherit; border: 1px solid #3c3c44; border-
 button:hover { background: #33333a; }
 button.primary { border-color: #e0a030; }
 button kbd { color: #e0a030; font: inherit; font-weight: 700; margin-right: 6px; }
-details { padding: 0 14px 8px; color: #c8c8d0; max-width: 980px; margin: 0 auto; width: 100%; }
+details { padding: 0 14px 8px; color: #c8c8d0; max-width: 1040px; margin: 0 auto; width: 100%; }
 #done { display: none; text-align: center; padding: 40px 16px; font-size: 18px; }
 </style></head><body>
 <header><b>burn2scar review</b>
-<span id="question">Was the pixel in the yellow square burned on or before THIS DATE?</span>
+<span id="question">Had the spot in the yellow square burned at any time up to THIS DATE? Ignore pictures after THIS DATE.</span>
 <span id="progress"></span></header>
-<main><img id="chip" alt="Satellite views of the point under review"><div id="done">All points answered. You can close this tab and run the score step.</div></main>
+<main><img id="chip" alt="Satellite views of the point under review"><div id="done">All points answered. You can close this tab.</div></main>
 <footer id="keys"></footer>
 <details><summary>How to answer</summary>
-<p><b>Burned:</b> a scar shows at this spot on THIS DATE, or on an earlier date, even if the spot looks green again by THIS DATE. In the false-colour views, healthy vegetation is green and fresh burn is a dark red or brown patch. Pale pink, lilac or tan is usually soil, dry grass or fields, above all if it was the same before the fire or follows field edges.
-<b>Not burned:</b> no sign of fire by THIS DATE. A scar that appears only on a later date counts as not burned.
-<b>Water, Cloud, Shadow:</b> the pixel is water, or cloud or any shadow, from a cloud or a mountain, covers it on THIS DATE. Real water stays dark on the other date too.
+<p>The top row shows the same spot on up to three dates, oldest on the left; the dates are the only captions. Judge only the pixel in the middle of the yellow square. In false colour, healthy vegetation is green and fresh burn is a dark red or brown patch; pale pink, lilac or tan is usually soil, dry grass or fields, above all if it looks the same on every date or follows field edges.</p>
+<p><b>Burned:</b> a scar shows at this spot on THIS DATE or on an earlier date, even if the spot looks green again by THIS DATE.
+<b>Burned, already on the earliest date:</b> the same, and the scar is already there on the leftmost image.
+<b>Not burned:</b> no sign of fire by THIS DATE; a scar that appears only on a later date counts as not burned.
+<b>Water, Cloud, Shadow:</b> the pixel is water, or cloud or any shadow, from a cloud or a mountain, covers it on THIS DATE. Real water stays dark on the other dates too.
 <b>Can't tell:</b> the images aren't enough, or snow hides the ground. Use it freely: a guess is worse than no answer.</p>
-<p>Judge only the pixel in the middle of the square. Backspace goes back one point. Your answers save on every key press.</p>
+<p>Backspace goes back one point. Your answers save on every key press.</p>
 </details>
 <script>
-const CHOICES = [["1","burned","Burned"],["2","not_burned","Not burned"],["3","water","Water"],["4","cloud","Cloud"],["5","shadow","Shadow"],["6","cant_tell","Can't tell"]];
+const CHOICES = [["1","burned","Burned"],["2","burned_before","Burned, already on the earliest date"],["3","not_burned","Not burned"],["4","water","Water"],["5","cloud","Cloud"],["6","shadow","Shadow"],["7","cant_tell","Can't tell"]];
 let ids = [], answers = {}, at = 0, shownAt = 0, times = [];
 const chip = document.getElementById("chip"), progress = document.getElementById("progress"), done = document.getElementById("done");
 const keys = document.getElementById("keys");
@@ -402,19 +460,28 @@ def latest_answers(path):
     return answers
 
 
-def select_ids(points, part, shared):
-    ids = points.sort_values("position")["point_id"].tolist()
-    if not part:
-        return ids
-    number, total = (int(x) for x in part.split("/"))
-    head, rest = ids[:shared], ids[shared:]
-    return head + rest[number - 1::total]
+def reviewer_order(points, reviewer):
+    """Every reviewer gets their own random order, so two people never move through the sample in step."""
+    rng = np.random.default_rng(zlib.crc32(reviewer.encode()))
+    ids = points["point_id"].tolist()
+    return [ids[i] for i in rng.permutation(len(ids))]
+
+
+def disagreements(out, points, names):
+    """First showings where the named reviewers gave different answers, or one of them has not answered."""
+    tables = [latest_answers(out / f"answers_{name}.csv") for name in names]
+    first = points[points["repeat_of"] < 0]["point_id"]
+    return [pid for pid in first if len({t.get(pid) for t in tables}) > 1 and all(pid in t for t in tables)]
 
 
 def run_serve(args):
     out = Path(args.out)
     points = pd.read_csv(out / "points.csv", low_memory=False)
-    ids = select_ids(points, args.part, args.shared)
+    if args.disagreements:
+        ids = disagreements(out, points, args.disagreements)
+        print(f"{len(ids):,} points where {' and '.join(args.disagreements)} disagree.")
+    else:
+        ids = reviewer_order(points, args.reviewer)
     known = set(ids)
     answers_path = out / f"answers_{args.reviewer}.csv"
     if not answers_path.exists():
@@ -474,67 +541,21 @@ def run_serve(args):
         pass
 
 
-# ----------------------------------------------------------------- second pass
-
-def run_second_pass(args):
-    """The points already answered, in a new order, in their own folder. The first pass isn't touched."""
-    source, out = Path(args.source), Path(args.out)
-    if (out / "points.csv").exists():
-        raise SystemExit(f"{out}/points.csv already exists.")
-    points = pd.read_csv(source / "points.csv", low_memory=False)
-    answered = latest_answers(source / f"answers_{args.reviewer}.csv")
-    keep = points[points["point_id"].isin(answered)].copy()
-    keep["position"] = np.random.default_rng(args.seed).permutation(len(keep))
-    out.mkdir(parents=True, exist_ok=True)
-    keep.sort_values("position").to_csv(out / "points.csv", index=False)
-    (out / "strata_area.csv").write_text((source / "strata_area.csv").read_text())
-    print(f"{len(keep):,} points in {out}/points.csv, in a new order. Don't open it before the review: it holds the mask classes.")
-
 
 # ----------------------------------------------------------------------- score
 
-def wilson(hits, total):
+def wilson(hits, total, z=1.96):
     if total == 0:
         return np.nan, np.nan
-    z = 1.96
     p = hits / total
     centre = (p + z * z / (2 * total)) / (1 + z * z / total)
     half = z * np.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / (1 + z * z / total)
-    return centre - half, centre + half
+    return max(centre - half, 0.0), min(centre + half, 1.0)
 
 
-MAP_BURNED, MAP_OTHER = ("fresh", "old"), ("clear_near", "clear_far", "water")
-
-
-def burn_estimates(burned_rate, weights):
-    """Area-weighted accuracy for burned against not burned, from a stratified sample (Olofsson et al. 2014).
-
-    burned_rate gives, per stratum, the share of its reviewed points that the reviewer called burned.
-    Fresh and old count as burned on the map. Clear and water count as not burned.
-    """
-    map_burned = sum(weights[s] for s in MAP_BURNED)
-    map_other = sum(weights[s] for s in MAP_OTHER)
-    both = sum(weights[s] * burned_rate[s] for s in MAP_BURNED)    # On the map and really burned.
-    missed = sum(weights[s] * burned_rate[s] for s in MAP_OTHER)   # Not on the map, but really burned.
-    total = map_burned + map_other
-    user = both / map_burned if map_burned else np.nan
-    producer = both / (both + missed) if both + missed else np.nan
-    return {
-        "precision": user, "recall": producer,
-        "f1": 2 * user * producer / (user + producer) if user + producer else np.nan,
-        "iou": both / (map_burned + missed) if map_burned + missed else np.nan,
-        "overall": (both + (map_other - missed)) / total,
-        "burned_share_map": map_burned / total,
-        "burned_share_estimated": (both + missed) / total,
-    }
-
-
-def bootstrap(hits, totals, weights, repeats, seed):
-    """Resampling within each stratum, which keeps the sample design."""
-    rng = np.random.default_rng(seed)
-    drawn = {s: rng.binomial(totals[s], hits[s] / totals[s], repeats) / totals[s] for s in totals}
-    table = pd.DataFrame([burn_estimates({s: drawn[s][i] for s in totals}, weights) for i in range(repeats)])
-    return table.quantile(.025), table.quantile(.975)
+def interval(hits, total):
+    low, high = wilson(hits, total)
+    return f"{100 * hits / total:.1f} ({100 * low:.1f}-{100 * high:.1f})" if total else ""
 
 
 def md(frame):
@@ -544,133 +565,301 @@ def md(frame):
     return "\n".join([head, rule, *body])
 
 
+def reference_class(answer):
+    return "burned" if answer in BURNED_ANSWERS else answer
+
+
+def error_matrix(counts, weights):
+    """Area-weighted error matrix from per-stratum answer counts (Olofsson et al. 2014, eq. 1 generalised to strata).
+
+    counts: {stratum: {reference class: n}}, cant_tell already left out. weights: pixel share per stratum.
+    Returns the matrix of area proportions, map classes as rows, reference classes as columns, and the accuracies.
+    """
+    strata = [s for s in counts if s in MAP_CLASS and sum(counts[s].values()) > 0]
+    total_weight = sum(weights[s] for s in strata)
+    classes = [c for c in REF_CLASSES if any(MAP_CLASS[s] == c for s in strata)]
+    classes += ["older_burn"] if any(MAP_CLASS[s] == "older_burn" for s in strata) else []
+    matrix = pd.DataFrame(0.0, index=classes, columns=REF_CLASSES)
+    for s in strata:
+        n = sum(counts[s].values())
+        for ref, k in counts[s].items():
+            matrix.at[MAP_CLASS[s], ref] += weights[s] / total_weight * k / n
+    overall = float(sum(matrix.at[c, expected(c)] for c in classes))
+    user = {c: matrix.at[c, expected(c)] / matrix.loc[c].sum() if matrix.loc[c].sum() else np.nan for c in classes}
+    producer = {c: matrix.at[c, c] / matrix[c].sum() if c in matrix.columns and matrix[c].sum() else np.nan for c in classes}
+    area = {c: matrix[c].sum() for c in REF_CLASSES}
+    return matrix, {"overall": overall, "user": user, "producer": producer, "area": area}
+
+
+def burn_summary(matrix):
+    """Burned against not burned, from the matrix: precision, recall, F1, IoU. Water, cloud and shadow rows are not burned.
+    The older_burn row is left out, as in the model evaluation: these scores cover the area outside older_burn."""
+    matrix = matrix.drop(index="older_burn", errors="ignore")
+    both = matrix.at["burned", "burned"]
+    map_burned = matrix.loc["burned"].sum()
+    ref_burned = matrix["burned"].sum()
+    precision = both / map_burned if map_burned else np.nan
+    recall = both / ref_burned if ref_burned else np.nan
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else np.nan
+    iou = both / (map_burned + ref_burned - both) if map_burned + ref_burned - both else np.nan
+    return {"precision": precision, "recall": recall, "f1": f1, "iou": iou, "map_share": map_burned, "ref_share": ref_burned}
+
+
+def bootstrap_matrix(counts, weights, repeats, seed):
+    """Resample answers within each stratum (multinomial), which keeps the design, and collect every statistic."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for _ in range(repeats):
+        drawn = {}
+        for s, table in counts.items():
+            n = sum(table.values())
+            if n == 0:
+                continue
+            refs = list(table)
+            sample = rng.multinomial(n, [table[r] / n for r in refs])
+            drawn[s] = dict(zip(refs, sample.tolist()))
+        matrix, acc = error_matrix(drawn, weights)
+        row = {"overall": acc["overall"]}
+        row.update({f"user_{c}": v for c, v in acc["user"].items()})
+        row.update({f"producer_{c}": v for c, v in acc["producer"].items()})
+        row.update({f"area_{c}": v for c, v in acc["area"].items()})
+        if "burned" in matrix.index:
+            row.update({f"burn_{k}": v for k, v in burn_summary(matrix).items()})
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    return table.quantile(.025), table.quantile(.975)
+
+
+def pct(value, low=None, high=None):
+    if pd.isna(value):
+        return ""
+    return f"{100 * value:.1f}" if low is None else f"{100 * value:.1f} ({100 * low:.1f}-{100 * high:.1f})"
+
+
+def kappa(a, b):
+    """Cohen's kappa for two sequences of labels."""
+    labels = sorted(set(a) | set(b))
+    table = pd.crosstab(pd.Categorical(a, labels), pd.Categorical(b, labels)).reindex(index=labels, columns=labels, fill_value=0)
+    n = table.to_numpy().sum()
+    observed = np.trace(table.to_numpy()) / n
+    expected = float((table.sum(axis=1) * table.sum(axis=0)).sum()) / (n * n)
+    return (observed - expected) / (1 - expected) if expected < 1 else np.nan
+
+
+def final_labels(points, out, reviewers, judge):
+    """One answer per first showing: the agreed answer, else the judge's, else none."""
+    tables = {name: latest_answers(out / f"answers_{name}.csv") for name in reviewers}
+    judged = latest_answers(out / f"answers_{judge}.csv") if judge else {}
+    final = {}
+    for pid in points[points["repeat_of"] < 0]["point_id"]:
+        given = [tables[name].get(pid) for name in reviewers]
+        if any(g is None for g in given):
+            continue
+        if len(set(given)) == 1:
+            final[pid] = given[0]
+        elif pid in judged:
+            final[pid] = judged[pid]
+    return final
+
+
+def score_one(points, weights, answers, title, bootstrap_n):
+    """Markdown and tables for one set of answers (one reviewer, or the final labels)."""
+    lines = [f"## {title}", ""]
+    first = points[points["repeat_of"] < 0].copy()
+    first["answer"] = first["point_id"].map(answers)
+    first = first[first["answer"].notna()]
+    if first.empty:
+        return lines + ["No answers yet.", ""], None
+    first["ref"] = first["answer"].map(reference_class)
+
+    # Per stratum: what was answered, and agreement with the map class, with Wilson intervals.
+    rows = []
+    for stratum in STRATA:
+        part = first[first["stratum"] == stratum]
+        if part.empty:
+            continue
+        shares = part["answer"].value_counts(normalize=True)
+        row = {"Stratum": stratum, "Map class": MAP_CLASS.get(stratum, "older_burn"), "Points": len(part),
+               "Share of data set %": round(100 * weights[stratum], 2)}
+        row.update({name: f"{100 * shares.get(name, 0):.1f}" for name in ANSWERS.values()})
+        seen = part[part["answer"] != "cant_tell"]
+        if stratum in MAP_CLASS:
+            hits = int((seen["ref"] == expected(MAP_CLASS[stratum])).sum())
+            row["Agreement %"] = interval(hits, len(seen))
+        else:
+            row["Agreement %"] = f"{int((seen['ref'] == 'burned').sum())} of {len(seen)} judged burned"
+        rows.append(row)
+    lines += ["Percent of answers per stratum. Agreement is the share of answers, can't tell left out, that match the map class, "
+              "with a 95 % Wilson interval. 'burned_before' means burned, with the scar already on the earliest date shown.", "",
+              md(pd.DataFrame(rows)), ""]
+
+    # The error matrix, area-weighted, with bootstrap intervals.
+    usable = first[(first["answer"] != "cant_tell") & first["stratum"].isin(MAP_CLASS)]
+    counts = {s: usable[usable["stratum"] == s]["ref"].value_counts().to_dict() for s in MAP_CLASS}
+    counts = {s: {r: int(k) for r, k in t.items()} for s, t in counts.items() if sum(t.values())}
+    matrix, acc = error_matrix(counts, weights)
+    low, high = bootstrap_matrix(counts, weights, bootstrap_n, 0)
+    shown = matrix.copy() * 100
+    shown["Map total"] = shown.sum(axis=1)
+    shown.loc["Reference total"] = shown.sum(axis=0)
+    shown = shown.round(2).rename_axis("Map class \\ reference").reset_index()
+    lines += ["### Error matrix, percent of the data set's area", "",
+              f"From {len(usable):,} points with a usable answer ({int((first['answer'] == 'cant_tell').sum())} can't tell left out). "
+              "Rows are the map classes, columns what the reviewer saw. Each cell is the area share estimated from the stratified sample, "
+              "so the cells that agree (the diagonal, and the burned cell of the older_burn row) add up to the overall accuracy.", "", md(shown), ""]
+    rows = [{"Measure": "Overall accuracy", "Estimate % (95 % interval)": pct(acc["overall"], low["overall"], high["overall"])}]
+    for c in matrix.index:
+        rows.append({"Measure": f"User's accuracy, {c} (precision)", "Estimate % (95 % interval)": pct(acc["user"][c], low[f"user_{c}"], high[f"user_{c}"])})
+        if c in REF_CLASSES:
+            rows.append({"Measure": f"Producer's accuracy, {c} (recall)", "Estimate % (95 % interval)": pct(acc["producer"][c], low[f"producer_{c}"], high[f"producer_{c}"])})
+    for c in REF_CLASSES:
+        rows.append({"Measure": f"Area of {c}, reviewer's estimate", "Estimate % (95 % interval)": pct(acc["area"][c], low[f"area_{c}"], high[f"area_{c}"])})
+    summary = burn_summary(matrix) if "burned" in matrix.index else {}
+    for key, label in (("precision", "Burned precision"), ("recall", "Burned recall"), ("f1", "Burned F1"), ("iou", "Burned IoU"),
+                       ("map_share", "Burned share, map"), ("ref_share", "Burned share, reviewer")):
+        if key in summary:
+            rows.append({"Measure": label, "Estimate % (95 % interval)": pct(summary[key], low[f"burn_{key}"], high[f"burn_{key}"])})
+    lines += ["### Accuracies from the matrix", "", "Bootstrap intervals from resampling within each stratum.", "", md(pd.DataFrame(rows)), ""]
+
+    # Groups, for the burn strata and the clear strata, with intervals.
+    burn = first[first["stratum"].isin([s for s in MAP_CLASS if MAP_CLASS[s] == "burned"]) & (first["answer"] != "cant_tell")].copy()
+    burn["size"] = pd.cut(burn["area_ha"].astype(float), [0, 10, 30, 100, 500, np.inf],
+                          labels=["5-10 ha", "10-30 ha", "30-100 ha", "100-500 ha", "500-2000 ha"])
+    burn["days"] = pd.cut(burn["age_days"].astype(float), [0, 20, 40, 61, 150, 225, 301],
+                          labels=["5-20 d", "20-40 d", "40-60 d", "120-150 d", "150-225 d", "225-300 d"])
+    burn["edge"] = pd.cut(burn["edge_m"].astype(float), [0, 15, 30, 100, np.inf],
+                          labels=["within 15 m", "15-30 m", "30-100 m", "over 100 m"])
+    month = pd.to_datetime(burn["fire_date"], errors="coerce").dt.month
+    burn["season"] = month.map({12: "Dec-Feb", 1: "Dec-Feb", 2: "Dec-Feb", 3: "Mar-May", 4: "Mar-May", 5: "Mar-May",
+                                6: "Jun-Aug", 7: "Jun-Aug", 8: "Jun-Aug", 9: "Sep-Nov", 10: "Sep-Nov", 11: "Sep-Nov"})
+    rows = []
+    for column, label in (("window", "Window"), ("country", "Country"), ("size", "Fire size"), ("days", "Days from the fire"),
+                          ("edge", "Distance inside the burn edge"), ("season", "Season of the fire"), ("fire_year", "Fire year"),
+                          ("land_cover", "Land cover")):
+        if column not in burn:
+            continue
+        for value, part in burn.groupby(column, observed=True):
+            hits = int((part["ref"] == "burned").sum())
+            rows.append({"Group": label, "Value": value, "Points": len(part), "Confirmed burned %": interval(hits, len(part))})
+    lines += ["### Burn labels confirmed, by group", "", "fresh and old strata together. Wilson 95 % intervals; the sizes say how much each group can carry.", "",
+              md(pd.DataFrame(rows)), ""]
+    clear = first[first["stratum"].isin(["clear_near", "clear_far"]) & (first["answer"] != "cant_tell")]
+    rows = []
+    for stratum, part in clear.groupby("stratum"):
+        hits = int((part["ref"] == "burned").sum())
+        rows.append({"Stratum": stratum, "Points": len(part), "Judged burned %": interval(hits, len(part))})
+    lines += ["### Burn seen where the map says clear", "", md(pd.DataFrame(rows)), ""]
+
+    # The date check: among burned answers, how often the scar was already on the earliest date shown.
+    rows = []
+    for stratum, part in first[first["ref"] == "burned"].groupby("stratum"):
+        hits = int((part["answer"] == "burned_before").sum())
+        rows.append({"Stratum": stratum, "Burned answers": len(part), "Scar already on the earliest date %": interval(hits, len(part))})
+    lines += ["### Scar already present on the earliest date shown", "",
+              "For burn strata this flags a scar older than the pre-fire image, so a fire date later than the scar, or an older burn at the same spot.", "",
+              md(pd.DataFrame(rows)), ""]
+    return lines, {"matrix": matrix, "accuracies": acc, "low": low, "high": high}
+
+
 def run_score(args):
     out = Path(args.out)
     points = pd.read_csv(out / "points.csv", low_memory=False)
     area = pd.read_csv(out / "strata_area.csv").set_index("stratum")["pixels"]
     weights = (area / area.sum()).to_dict()
-    files = sorted(out.glob("answers_*.csv"))
-    if not files:
-        raise SystemExit("No answers yet")
-    tables = []
-    for file in files:
-        data = pd.read_csv(file)
-        total_ms = data["ms"].clip(upper=120000).sum()
-        data = data.drop_duplicates("point_id", keep="last")
-        data["reviewer"] = file.stem.replace("answers_", "")
-        data.attrs["hours"] = total_ms / 3.6e6
-        tables.append(data)
-    answers = pd.concat(tables, ignore_index=True)
-    merged = answers.merge(points, on="point_id", how="left")
-    unknown = merged["stratum"].isna().sum()
-    if unknown:
-        raise SystemExit(f"{unknown} answers don't match {out}/points.csv")
-
-    # One answer per point for the estimates: the first reviewer's, leaving out repeats.
-    first = merged[merged["repeat_of"] < 0].sort_values("reviewer").drop_duplicates("point_id")
-    expected = {"fresh": "burned", "old": "burned", "clear_near": "not_burned", "clear_far": "not_burned",
-                "water": "water", "cloud": "cloud", "shadow": "shadow"}
-    lines = ["# burn2scar label review", ""]
-    lines += [f"- Reviewers: {', '.join(sorted(answers['reviewer'].unique()))}",
-              f"- Points answered: {len(answers):,} of {len(points):,}",
-              f"- Time spent: {sum(t.attrs['hours'] for t in tables):.1f} hours", ""]
-
-    rows = []
-    for stratum in DEFAULT_COUNTS:
-        part = first[first["stratum"] == stratum]
-        if part.empty:
+    lines = ["# burn2scar label review, second edition", ""]
+    hours = {}
+    per_reviewer = {}
+    for name in args.reviewers:
+        path = out / f"answers_{name}.csv"
+        if not path.exists():
+            lines.append(f"- {name}: no answers yet")
             continue
-        shares = part["answer"].value_counts(normalize=True)
-        row = {"Mask class": stratum, "Points": len(part), "Share of dataset %": round(100 * weights[stratum], 2)}
-        row.update({name: f"{100 * shares.get(name, 0):.1f}" for name in ANSWERS.values()})
-        goal = expected.get(stratum)
-        if goal:
-            seen = part[part["answer"] != "cant_tell"]
-            hits = int((seen["answer"] == goal).sum())
-            low, high = wilson(hits, len(seen))
-            row["Agreement %"] = f"{100 * hits / max(len(seen), 1):.1f} ({100 * low:.1f}-{100 * high:.1f})"
-        rows.append(row)
-    lines += ["## What the reviewer saw, by mask class",
-              "", "Percent of answers. Agreement leaves out `cant_tell`, with a 95% interval.", "", md(pd.DataFrame(rows)), ""]
+        data = pd.read_csv(path)
+        hours[name] = data["ms"].clip(upper=120000).sum() / 3.6e6
+        per_reviewer[name] = latest_answers(path)
+        shown_once = points[points["repeat_of"] < 0]["point_id"]
+        lines.append(f"- {name}: {sum(pid in per_reviewer[name] for pid in shown_once):,} of {len(shown_once):,} points, {hours[name]:.1f} hours")
+    lines.append("")
 
-    # Burned against not burned, area-weighted. Points where the ground can't be seen can't be judged.
-    usable = first[first["stratum"].isin(["fresh", "old", "clear_near", "clear_far", "water"])
-                   & first["answer"].isin(["burned", "not_burned", "water"])].copy()
-    if usable["stratum"].nunique() == 5:
-        totals = usable["stratum"].value_counts().to_dict()
-        hits = usable[usable["answer"] == "burned"]["stratum"].value_counts().to_dict()
-        hits = {s: hits.get(s, 0) for s in totals}
-        estimate = burn_estimates({s: hits[s] / totals[s] for s in totals}, weights)
-        low, high = bootstrap(hits, totals, weights, args.bootstrap, 0)
-        names = {"precision": "Precision (1 - commission error)", "recall": "Recall (1 - omission error)", "f1": "Burnt F1",
-                 "iou": "Burnt IoU", "overall": "Overall accuracy", "burned_share_map": "Burned share, from the mask",
-                 "burned_share_estimated": "Burned share, estimated from the review"}
-        table = pd.DataFrame([{"Measure": label, "Estimate %": f"{100 * estimate[key]:.1f}",
-                               "95% interval": f"{100 * low[key]:.1f}-{100 * high[key]:.1f}"} for key, label in names.items()])
-        lines += ["## Burned against not burned, weighted by area", "",
-                  f"From {len(usable):,} points. Masks count as burned for fresh and old, as not burned for clear and water.", "",
-                  md(table), ""]
-    else:
-        lines += ["Not enough points in every class yet for the area-weighted estimate.", ""]
-
-    # Breakdown for the burn classes.
-    rows = []
-    for column in ("country", "window", "fire_year", "land_cover"):
-        for value, part in first[first["stratum"].isin(["fresh", "old"]) & (first["answer"] != "cant_tell")].groupby(column):
-            hits = int((part["answer"] == "burned").sum())
-            low, high = wilson(hits, len(part))
-            rows.append({"Group": column, "Value": value, "Points": len(part),
-                         "Confirmed burned %": f"{100 * hits / len(part):.1f} ({100 * low:.1f}-{100 * high:.1f})"})
-    if rows:
-        lines += ["## Burn labels confirmed, by group", "", md(pd.DataFrame(rows)), ""]
-
-    # Consistency of one person, on points shown twice.
-    repeats = merged[merged["repeat_of"] >= 0]
-    pairs = []
-    for row in repeats.itertuples():
-        source = merged[(merged["source_row"] == row.repeat_of) & (merged["repeat_of"] < 0) & (merged["reviewer"] == row.reviewer)]
-        if len(source):
-            pairs.append(source.iloc[0]["answer"] == row.answer)
-    if pairs:
-        low, high = wilson(sum(pairs), len(pairs))
-        lines += [f"Same person, same point shown twice: {100 * np.mean(pairs):.1f}% the same answer "
-                  f"({100 * low:.1f}-{100 * high:.1f}), {len(pairs)} points.", ""]
-    # Agreement between two people.
-    if answers["reviewer"].nunique() > 1:
-        table = answers.pivot_table(index="point_id", columns="reviewer", values="answer", aggfunc="first").dropna()
+    # Agreement between reviewers, on first showings answered by all.
+    if len(per_reviewer) >= 2:
+        names = list(per_reviewer)
+        first = points[points["repeat_of"] < 0]
+        table = pd.DataFrame({name: first["point_id"].map(per_reviewer[name]).to_numpy() for name in names}, index=first["point_id"].to_numpy()).dropna()
         if len(table):
-            same = table.nunique(axis=1).eq(1)
-            low, high = wilson(int(same.sum()), len(same))
-            lines += [f"Two reviewers, same point: {100 * same.mean():.1f}% the same answer ({100 * low:.1f}-{100 * high:.1f}), {len(same)} points.", ""]
+            full = table.nunique(axis=1).eq(1)
+            coarse = table.apply(lambda col: col.map(reference_class)).nunique(axis=1).eq(1)
+            lines += ["## Agreement between reviewers", "",
+                      f"- Same answer on {int(full.sum()):,} of {len(table):,} points: {interval(int(full.sum()), len(table))} %",
+                      f"- Same class (burned, not burned, water, cloud, shadow, can't tell): {interval(int(coarse.sum()), len(table))} %",
+                      f"- Cohen's kappa on the class: {kappa(table[names[0]].map(reference_class), table[names[1]].map(reference_class)):.3f}" if len(names) == 2 else "", ""]
+            by_stratum = []
+            strata = first.set_index("point_id").loc[table.index, "stratum"]
+            for stratum, idx in strata.groupby(strata).groups.items():
+                part = coarse.loc[idx]
+                by_stratum.append({"Stratum": stratum, "Points": len(part), "Same class %": interval(int(part.sum()), len(part))})
+            lines += [md(pd.DataFrame(by_stratum)), ""]
+            if args.judge:
+                judged = latest_answers(out / f"answers_{args.judge}.csv")
+                open_ones = [pid for pid in table.index[~full] if pid not in judged]
+                lines += [f"- Disagreements: {int((~full).sum()):,}; adjudicated: {int((~full).sum()) - len(open_ones):,}; still open: {len(open_ones):,}", ""]
+
+    # One person's consistency, on the repeats.
+    for name, answers in per_reviewer.items():
+        repeats = points[points["repeat_of"] >= 0]
+        pairs = []
+        for rec in repeats.itertuples():
+            source = points[(points["source_row"] == rec.repeat_of) & (points["repeat_of"] < 0)]
+            if len(source) and rec.point_id in answers and source.iloc[0]["point_id"] in answers:
+                pairs.append(answers[rec.point_id] == answers[source.iloc[0]["point_id"]])
+        if pairs:
+            lines += [f"- {name}, same point shown twice: {interval(sum(pairs), len(pairs))} % the same answer, {len(pairs)} points", ""]
+
+    results = {}
+    final = final_labels(points, out, list(per_reviewer), args.judge) if len(per_reviewer) >= 2 else {}
+    if final:
+        text, results["final"] = score_one(points, weights, final, f"Final labels ({len(final):,} points: agreed, or adjudicated by {args.judge or 'nobody yet'})", args.bootstrap)
+        lines += text
+    for name, answers in per_reviewer.items():
+        text, results[name] = score_one(points, weights, answers, f"Reviewer {name}", args.bootstrap)
+        lines += text
     text = "\n".join(lines)
     (out / "review_summary.md").write_text(text)
+    for name, result in results.items():
+        if result:
+            (result["matrix"] * 100).round(3).to_csv(out / f"error_matrix_{name}.csv")
     print(text)
-    print(f"Wrote {out}/review_summary.md")
+    print(f"Wrote {out}/review_summary.md and the error matrices as CSV.")
 
 
 def run_export(args):
-    """reviewed_points.csv and review_strata.csv, in <out>/release. Only what a reader needs to redo the scores."""
+    """reviewed_points.csv and review_strata.csv in <out>/release: every point, each reviewer's answer, the final label."""
     out = Path(args.out)
     points = pd.read_csv(out / "points.csv", low_memory=False)
-    answers = pd.read_csv(out / f"answers_{args.reviewer}.csv", dtype=str).drop_duplicates("point_id", keep="last")
-    table = points.merge(answers[["point_id", "answer"]], on="point_id", how="left")
-    if table["answer"].isna().any():
-        print(f"{int(table['answer'].isna().sum()):,} points have no answer; their answer column is empty.")
+    shown = pd.read_csv(out / "chips_shown.csv") if (out / "chips_shown.csv").exists() else None
+    table = points.copy()
+    for name in args.reviewers + ([args.judge] if args.judge else []):
+        table[f"answer_{name}"] = table["point_id"].map(latest_answers(out / f"answers_{name}.csv"))
+    final = final_labels(points, out, args.reviewers, args.judge)
+    table["answer_final"] = table["point_id"].map(final)
+    if shown is not None:
+        table = table.merge(shown, on="point_id", how="left")
     first_showing = table[table["repeat_of"] < 0].set_index("source_row")["point_id"]
     table["repeat_of"] = [first_showing.get(source, "") if source >= 0 else "" for source in table["repeat_of"]]
-    table["order"] = table["position"] + 1
-    columns = ["point_id", "order", "repeat_of", "tile_id", "fire_id", "scene_time", "country", "window", "fire_year",
-               "land_cover", "stratum", "mask_value", "row", "col", "lon", "lat", "answer"]
-    table = table.sort_values("order")[[c for c in columns if c in table.columns]]
+    columns = ["point_id", "repeat_of", "tile_id", "fire_id", "scene_time", "country", "window", "fire_year", "fire_date", "age_days",
+               "area_ha", "land_cover", "stratum", "mask_value", "row", "col", "lon", "lat", "edge_m", "dates_shown", "earliest_date",
+               "prefire_shown"] + [c for c in table.columns if c.startswith("answer_")]
+    table = table[[c for c in columns if c in table.columns]]
     target = out / "release"
     target.mkdir(exist_ok=True)
     table.to_csv(target / "reviewed_points.csv", index=False)
     area = pd.read_csv(out / "strata_area.csv")
     area["share_percent"] = (100 * area["pixels"] / area["pixels"].sum()).round(4)
+    area["map_class"] = area["stratum"].map(MAP_CLASS).fillna("older_burn")
     area.to_csv(target / "review_strata.csv", index=False)
-    shown_once = table[table["repeat_of"] == ""]
-    print(shown_once["stratum"].value_counts().rename("points").to_string())
-    print(f"{len(shown_once):,} points, {len(table) - len(shown_once):,} of them shown a second time.")
+    once = table[table["repeat_of"] == ""]
+    print(once["stratum"].value_counts().rename("points").to_string())
+    print(f"{len(once):,} points, {len(table) - len(once):,} shown a second time, {int(table['answer_final'].notna().sum()):,} with a final label.")
     print(f"Wrote {target / 'reviewed_points.csv'} and {target / 'review_strata.csv'}")
 
 
@@ -678,41 +867,38 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     sample = commands.add_parser("sample")
-    sample.add_argument("--index", default="data/v2/index.csv")
-    sample.add_argument("--masks-root", default="data/v2")
-    sample.add_argument("--out", default="review")
-    sample.add_argument("--counts", nargs="*", help="change a sample size, e.g. fresh=500 clear_far=200")
-    sample.add_argument("--repeat", type=float, default=.05, help="share of points shown twice")
-    sample.add_argument("--seed", type=int, default=20261104)
+    sample.add_argument("--index", default="data/v3/index.csv")
+    sample.add_argument("--masks-root", default="data/v3")
+    sample.add_argument("--out", default="review2")
+    sample.add_argument("--counts", nargs="*", help="change a stratum's size, e.g. old=120 older=20")
+    sample.add_argument("--repeat", type=float, default=.05, help="share of points shown twice to each reviewer")
+    sample.add_argument("--seed", type=int, default=2026)
     sample.add_argument("--workers", type=int, default=8)
     sample.add_argument("--overwrite", action="store_true")
+    sample.add_argument("--supplement", action="store_true", help="add a batch to the existing sample; --counts gives the extra points per stratum")
     chips = commands.add_parser("chips")
-    chips.add_argument("--out", default="review")
-    chips.add_argument("--index", default="data/v2/index.csv", help="finds the other date of each fire")
+    chips.add_argument("--out", default="review2")
+    chips.add_argument("--index", default="data/v3/index.csv", help="finds the other date of each fire")
     chips.add_argument("--images-root", default="data/v1")
     chips.add_argument("--prefire-root", default="")
     chips.add_argument("--workers", type=int, default=8)
     serve = commands.add_parser("serve")
-    serve.add_argument("--out", default="review")
+    serve.add_argument("--out", default="review2")
     serve.add_argument("--reviewer", required=True)
-    serve.add_argument("--part", default="", help="e.g. 1/2 and 2/2 to share the work between two people")
-    serve.add_argument("--shared", type=int, default=100, help="points that both people review when using --part")
+    serve.add_argument("--disagreements", nargs=2, metavar="REVIEWER", help="serve only the points where these two disagree")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
-    second = commands.add_parser("second-pass")
-    second.add_argument("--source", default="review")
-    second.add_argument("--out", default="review2")
-    second.add_argument("--reviewer", default="param")
-    second.add_argument("--seed", type=int, default=20261107)
     score = commands.add_parser("score")
-    score.add_argument("--out", default="review")
+    score.add_argument("--out", default="review2")
+    score.add_argument("--reviewers", nargs="+", required=True)
+    score.add_argument("--judge", default="")
     score.add_argument("--bootstrap", type=int, default=2000)
     export = commands.add_parser("export")
-    export.add_argument("--out", default="review")
-    export.add_argument("--reviewer", default="param")
+    export.add_argument("--out", default="review2")
+    export.add_argument("--reviewers", nargs="+", required=True)
+    export.add_argument("--judge", default="")
     args = parser.parse_args()
-    {"sample": run_sample, "chips": run_chips, "second-pass": run_second_pass, "serve": run_serve, "score": run_score,
-     "export": run_export}[args.command](args)
+    {"sample": run_sample, "chips": run_chips, "serve": run_serve, "score": run_score, "export": run_export}[args.command](args)
 
 
 if __name__ == "__main__":
