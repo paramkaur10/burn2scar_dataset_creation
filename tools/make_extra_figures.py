@@ -56,6 +56,12 @@ def clean(frame):
     return (frame["frac_cloud"] < .01) & (frame["frac_shadow"] < .01) & (frame["frac_nodata"] < .01)
 
 
+def snow_free(frame):
+    """Scenes from April to October, so no snow, which the masks have no class for."""
+    month = pd.to_datetime(frame["scene_time"], format="mixed", utc=True, errors="coerce").dt.month
+    return month.between(4, 10)
+
+
 def window_of(row, shape):
     """(top, left, size): a 960 m window at the centre for small fires, else the whole tile."""
     if row["area_ha"] < ZOOM_HA and min(shape) > ZOOM_PX:
@@ -86,7 +92,8 @@ def pick_evidence(frame, old_rows_path, seed):
         row = one(fresh[rule], seed)
         if row is not None:
             picks.append(row)
-    old = frame[(frame["window"] == "old") & clean(frame) & (frame["area_ha"] >= 100) & frame["own_frac"].between(.15, .6)]
+    old = frame[(frame["window"] == "old") & clean(frame) & snow_free(frame) & (frame["area_ha"] >= 100)
+                & frame["own_frac"].between(.15, .6)]
     if Path(old_rows_path).exists():
         rows = pd.read_csv(old_rows_path, usecols=["tile_id", "flag", "contrast"]).drop_duplicates("tile_id", keep="last")
         old = old.drop(columns=[c for c in ("flag", "contrast") if c in old.columns]).merge(rows, on="tile_id")
@@ -266,7 +273,7 @@ def pick_predictions(frame, seed):
              ("small fire", fresh & (test["dnbr_flag"] == "burn") & test["area_ha"].between(5, 20) & tidy),
              ("both ages", (test["frac_fresh"] >= .05) & (test["frac_old"] >= .05) & tidy),
              ("cloud and shadow", fresh & (test["frac_cloud"] >= .05) & (test["frac_shadow"] >= .02) & (test["frac_fresh"] >= .05)),
-             ("flagged none", fresh & (test["dnbr_flag"] == "none") & test["area_ha"].between(30, 300) & tidy)]
+             ("flagged none", fresh & (test["dnbr_flag"] == "none") & test["area_ha"].between(30, 300) & tidy & snow_free(test))]
     picks = []
     for name, rule in rules:
         row = one(test[rule], seed)

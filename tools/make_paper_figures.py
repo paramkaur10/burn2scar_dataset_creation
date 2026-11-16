@@ -204,9 +204,9 @@ def figure_workflow(out):
         ax.text(x, 8.42, title, fontsize=7, fontweight="bold", va="center")
 
     x, w = columns["Sources"]
-    sources = [("EFFIS perimeters", f"{number(25707)} fires in four\ncountries, 2020\u20132026"),
+    sources = [("EFFIS perimeters", f"{number(25707)} fires in four\ncountries, 2020\u20132026,\nand perimeters from 2018"),
                ("Sentinel-2 L1C", "13 bands, for images\nand masks"),
-               ("Sentinel-2 L2A", "scene cloud cover and\nscene classification"),
+               ("Sentinel-2 L2A", "scene cloud cover, scene\nclassification and the\nburn evidence (dNBR)"),
                ("OmniCloudMask", "cloud and shadow from\nthree L1C bands")]
     for i, (title, text) in enumerate(sources):
         block(x, 6.95 - i * 1.41, w, 1.23, title, text, "#f2f1ec")
@@ -215,7 +215,7 @@ def figure_workflow(out):
     steps = [("1  Select fires", f"5\u20132000 ha; France south of 46° N\n{number(19443)} fires", 1.0),
              ("2  Share the budget by country", f"largest fires first\n{number(13895)} fires kept", 1.0),
              ("3  Search two windows per fire", f"5\u201360 and 120\u2013300 days after the fire date\nleast cloudy scene with burn at most\n50 % hidden; {number(26846)} tiles", 1.2),
-             ("4  Build masks", "burn age from every EFFIS perimeter in the tile,\nthen water, shadow and cloud; winter water\nchecked on the fire's March–October scene", 1.2),
+             ("4  Build masks and age rasters", "burn from every EFFIS perimeter since 2018,\ndated into classes and an age raster; then\nwater, shadow, cloud; winter water checked", 1.2),
              ("5  Assign spatial blocks", "overlapping fires stay together\nmain, time and country splits", 1.0)]
     top = 8.18
     previous = None
@@ -227,7 +227,7 @@ def figure_workflow(out):
         top -= h + .19
 
     x, w = columns["Released"]
-    outputs = [("Tiles", "13-band image and mask,\nGeoTIFF, 2.56 km, 10 m"), ("Index", "one row per tile, with\nattributes and splits"), ("Reference files", "EFFIS snapshot and the\nreviewed points")]
+    outputs = [("Tiles", "13-band image, mask and\nage raster, GeoTIFF;\n2.56 km, 10 m"), ("Index", "one row per tile, with\nattributes, quality flags\nand splits"), ("Reference files", "EFFIS exports, burn\nevidence and the\nreviewed points")]
     for i, (title, text) in enumerate(outputs):
         block(x, 6.95 - i * 1.41, w, 1.23, title, text, "#fdeee0")
 
@@ -235,9 +235,10 @@ def figure_workflow(out):
     arrow((8.35, 4.95), (9.0, 4.95))
 
     ax.text(0, 1.22, "Checks", fontsize=7, fontweight="bold", va="center")
-    checks = [("Copernicus EMS maps", "made separately from EFFIS"), ("Reviewed points", "blind labels from the imagery"), ("Baseline models", "the labels can be learned")]
+    checks = [("Burn evidence", "dNBR of every fire,\nfrom two dates"), ("Reviewed points", "blind labels from\nthe imagery"),
+              ("Copernicus EMS maps", "made separately\nfrom EFFIS"), ("Baseline models", "the labels can be\nlearned")]
     for i, (title, text) in enumerate(checks):
-        block(i * 4.1, 0, 3.8, 1.0, title, text, "#eaf2fb")
+        block(i * 3.05, 0, 2.85, 1.0, title, text, "#eaf2fb")
     arrow((10.5, 4.08), (10.5, 1.42))
     ax.plot([0, 12], [1.42, 1.42], color="#8a8984", linewidth=.4)
     fig.subplots_adjust(0, 0, 1, 1)
