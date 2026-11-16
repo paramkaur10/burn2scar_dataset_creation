@@ -171,6 +171,11 @@ def main():
     index = pd.read_csv(args.index, low_memory=False)
     index["fire_id"] = index["fire_id"].astype(str)
     out = [f"# Numbers for the paper\n\nIndex {args.index}: {len(index):,} tiles, {index['fire_id'].nunique():,} fires."]
+    if "split" in index.columns and index["split"].isna().any():   # the early-run tiles that are not released
+        unreleased = index["split"].isna()
+        out.append(f"Left out {unreleased.sum():,} tiles of {index.loc[unreleased, 'fire_id'].nunique():,} fires that have "
+                   f"no split and are not released; {(~unreleased).sum():,} tiles remain.")
+        index = index[~unreleased].copy()
     parts = [("2. Fresh scenes before the recorded end of the fire (Sect. 5.5)", early_scenes),
              ("3. Burn evidence by days after the fire (Sect. 5.5)", evidence_by_day),
              ("4. older_burn by scene year (Sect. 5.5)", older_by_year),
