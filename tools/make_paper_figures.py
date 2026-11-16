@@ -3,7 +3,7 @@
 
   python tools/make_paper_figures.py --out paper/figures
 
-Reads data/v2/index.csv, the masks in data/v2, the images in data/v1 and, when they exist,
+Reads data/v4/index.csv, the masks and age rasters in data/v4, the images in data/v1 and, when they exist,
 validation/cems_*.csv and data/cems. It uses no GPU and downloads nothing, and it can run while
 models train. It writes fig01.pdf to fig08.pdf in --out, and paper_numbers.md next to them with
 every number the manuscript takes from the data.
@@ -13,7 +13,8 @@ every number the manuscript takes from the data.
 makes only Figure 7, the reflectance of each class, and spectra_numbers.md. It reads about 4000
 tiles, takes a few minutes, and writes under 1 MB.
 
-The figures follow the ESSD rules: one sans-serif font family, embedded; panels in one file,
+The figures follow the ESSD rules: one sans-serif font family (Arial or its metric twin Liberation Sans when
+installed, else DejaVu Sans), embedded; panels in one file,
 labelled (a), (b); 300 dpi for raster parts; a legend inside the figure for every symbol; en dashes
 in ranges; a space between number and unit; no borders on maps; colours checked for colour blindness.
 
@@ -37,6 +38,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import rasterio  # noqa: E402
 import yaml  # noqa: E402
+from matplotlib import font_manager  # noqa: E402
+from matplotlib.cm import ScalarMappable  # noqa: E402
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap, LogNorm  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Patch, Rectangle  # noqa: E402
@@ -66,6 +69,8 @@ LINE_COLOUR = {**CLASS_COLOUR, "clear": "#8a8984"}
 LINE_STYLE = {"fresh": "-", "water": (0, (4, 1.5)), "shadow": (0, (1, 1.2)),
               "old": (0, (4, 1.5)), "older": (0, (1, 1.2)), "clear": (0, (4, 1.2, 1, 1.2))}  # So colour isn't the only clue.
 LOW_SUN_MONTHS = [11, 12, 1, 2]  # Water by scene month shows what these months add to the water class.
+FONTS = ["Arial", "Liberation Sans", "Helvetica", "Nimbus Sans"]  # TrueType files only, so they embed as Type 42.
+AGE_TICKS = [1, 10, 90, 365, 1000]
 
 
 def number(value):
@@ -78,9 +83,21 @@ def number_ticks(axis):
     axis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: number(v)))
 
 
+def pick_font():
+    """The first Arial-like family installed as TrueType; DejaVu Sans, matplotlib's own, is the last resort."""
+    installed = {font.name for font in font_manager.fontManager.ttflist if font.fname.lower().endswith(".ttf")}
+    name = next((family for family in FONTS if family in installed), "DejaVu Sans")
+    if name == "DejaVu Sans":
+        print("Font: DejaVu Sans. For Liberation Sans (Arial's metrics): "
+              "apt-get install -y fonts-liberation && rm -rf ~/.cache/matplotlib, then run again.", flush=True)
+    else:
+        print(f"Font: {name}", flush=True)
+    return name
+
+
 def set_style():
     plt.rcParams.update({
-        "font.family": "DejaVu Sans", "font.size": 7, "axes.titlesize": 7, "axes.labelsize": 7,
+        "font.family": pick_font(), "font.size": 7, "axes.titlesize": 7, "axes.labelsize": 7,
         "xtick.labelsize": 6.5, "ytick.labelsize": 6.5, "legend.fontsize": 6.5,
         "axes.spines.top": False, "axes.spines.right": False, "axes.linewidth": .5, "axes.edgecolor": "#8a8984",
         "xtick.major.width": .5, "ytick.major.width": .5, "xtick.major.size": 2.5, "ytick.major.size": 2.5,
@@ -106,6 +123,65 @@ def save(fig, out, name):
 def grid(ax, axis="y"):
     ax.grid(True, axis=axis, color=RULE, linewidth=.4, zorder=0)
     ax.set_axisbelow(True)
+
+
+def frame_panel(ax):
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for side in ax.spines.values():
+        side.set_visible(True)
+        side.set_linewidth(.3)
+
+
+def mask_colours():
+    values = sorted(MASK_VALUE.values())
+    by_value = {value: name for name, value in MASK_VALUE.items()}
+    colours = ListedColormap([CLASS_COLOUR[by_value[value]] for value in values])
+    return colours, BoundaryNorm([v - .5 for v in values] + [values[-1] + .5], colours.N)
+
+
+def age_colours():
+    """Days since the perimeter date, on a log scale: the more recent, the darker, as with the burn classes."""
+    stops = [(0, "#2b0d02"), (.45, CLASS_COLOUR["fresh"]), (.6, CLASS_COLOUR["old"]), (.78, CLASS_COLOUR["older"]),
+             (1, "#fde9cc")]
+    colours = LinearSegmentedColormap.from_list("age", stops)
+    colours.set_bad(CLASS_COLOUR["clear"])
+    return colours, LogNorm(vmin=1, vmax=3000)
+
+
+def own_perimeters(config, fire_ids):
+    """The EFFIS outlines of the given fires, as {fire_id: geometry}, and their CRS."""
+    from burn_labels import load_perimeters
+    perimeters = load_perimeters(yaml.safe_load(Path(config).read_text()))
+    part = perimeters[perimeters["fire_id"].isin(set(fire_ids))].drop_duplicates("fire_id")
+    return dict(zip(part["fire_id"], part.geometry)), perimeters.crs
+
+
+def draw_outline(ax, geometry, crs, tile_crs, transform, offset=(0, 0), colour="white", width=.6, style="-"):
+    """A polygon's boundary over an imshow image of the tile; offset is the (row, col) of a crop's corner."""
+    shape = gpd.GeoSeries([geometry], crs=crs).to_crs(tile_crs).iloc[0]
+    boundary = shape.boundary
+    for line in getattr(boundary, "geoms", [boundary]):
+        xs, ys = line.xy
+        cols, rows = ~transform * (np.asarray(xs), np.asarray(ys))
+        ax.plot(np.asarray(cols) - .5 - offset[1], np.asarray(rows) - .5 - offset[0], color=colour, linewidth=width,
+                linestyle=style, solid_capstyle="round")
+
+
+def scale_bar(ax, size_px, metres, colour="white"):
+    """A bar of `metres` at the lower left of an image panel `size_px` pixels across, at 10 m per pixel."""
+    length, x, y = metres / 10, size_px * .06, size_px * .92
+    ax.plot([x, x + length], [y, y], color=colour, linewidth=1.2, solid_capstyle="butt")
+    ax.text(x + length / 2, y - size_px * .03, f"{metres / 1000:g} km" if metres >= 1000 else f"{metres:g} m",
+            ha="center", va="bottom", fontsize=5, color=colour)
+
+
+def read_age(masks_root, row):
+    path = row.get("age_path")
+    if not isinstance(path, str) or not (Path(masks_root) / path).exists():
+        return None
+    with rasterio.open(Path(masks_root) / path) as src:
+        return src.read(1)
 
 
 # ------------------------------------------------------------------ diagrams, no data needed
@@ -290,36 +366,53 @@ def choose_examples(frame):
     return chosen[:6]
 
 
-def figure_examples(frame, images_root, masks_root, out, tile_ids=None):
+def figure_examples(frame, images_root, masks_root, out, tile_ids=None, config="config.yaml"):
+    """Six tiles as released: true colour, false colour with the fire's EFFIS outline, the mask and the age raster."""
     from review_points import BAND, FALSE_COLOUR, TRUE_COLOUR
     rows = [frame[frame["tile_id"] == tile].iloc[0] for tile in tile_ids] if tile_ids else choose_examples(frame)
-    values = sorted(MASK_VALUE.values())
-    by_value = {value: name for name, value in MASK_VALUE.items()}
-    colours = ListedColormap([CLASS_COLOUR[by_value[value]] for value in values])
-    edges = [v - .5 for v in values] + [values[-1] + .5]
-    norm = BoundaryNorm(edges, colours.N)
-    fig, axes = plt.subplots(3, 6, figsize=(WIDTH, 7.7 * CM))
+    try:
+        outlines, outline_crs = own_perimeters(config, [row["fire_id"] for row in rows])
+    except Exception as error:   # the figure still works without the outlines
+        print(f"No EFFIS outlines ({type(error).__name__}: {error}); Figure 4 is drawn without them.", flush=True)
+        outlines, outline_crs = {}, None
+    mask_cmap, mask_norm = mask_colours()
+    age_cmap, age_norm = age_colours()
+    fig, axes = plt.subplots(4, 6, figsize=(WIDTH, 9.4 * CM))
     any_nodata = False
     for letter, column, row in zip("abcdef", axes.T, rows):
         image_path = Path(images_root) / row["image_path"]
         with rasterio.open(Path(masks_root) / row["mask_path"]) as src:
-            mask = src.read(1)
+            mask, tile_crs, transform = src.read(1), src.crs, src.transform
         any_nodata |= bool((mask == MASK_VALUE["nodata"]).any())
         column[0].imshow(read_rgb(image_path, TRUE_COLOUR, BAND))
         column[1].imshow(read_rgb(image_path, FALSE_COLOUR, BAND))
-        column[2].imshow(mask, cmap=colours, norm=norm)
+        if row["fire_id"] in outlines:
+            draw_outline(column[1], outlines[row["fire_id"]], outline_crs, tile_crs, transform)
+        column[2].imshow(mask, cmap=mask_cmap, norm=mask_norm)
+        age = read_age(masks_root, row)
+        if age is not None:
+            column[3].imshow(np.ma.masked_less(age, 1), cmap=age_cmap, norm=age_norm)
+        else:
+            column[3].text(.5, .5, "no age raster", transform=column[3].transAxes, ha="center", va="center",
+                           fontsize=5.5, color=INK2)
+        for ax in column:
+            ax.set_xlim(-.5, mask.shape[1] - .5)
+            ax.set_ylim(mask.shape[0] - .5, -.5)
         column[0].set_title(f"({letter}) {COUNTRY_NAME.get(row['country'], row['country'])}, {row['window']}\nday {row['age_days']:.0f}", fontsize=6, linespacing=1.1, pad=2.5)
     for ax in axes.ravel():
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for side in ax.spines.values():
-            side.set_visible(True)
-            side.set_linewidth(.3)
-    for ax, label in zip(axes[:, 0], ("True colour", "False colour", "Mask")):
+        frame_panel(ax)
+    for ax, label in zip(axes[:, 0], ("True colour", "False colour", "Mask", "Age")):
         ax.set_ylabel(label, fontsize=6.5, labelpad=2)
+    fig.subplots_adjust(left=.035, right=.995, top=.925, bottom=.15, wspace=.04, hspace=.04)
     handles = [Patch(facecolor=CLASS_COLOUR[name], edgecolor="#8a8984", linewidth=.3, label=CLASS_LABEL[name]) for name in [*CLASSES, *(["nodata"] if any_nodata else [])]]
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles), columnspacing=.7, handlelength=1, handletextpad=.3, fontsize=5.8)
-    fig.subplots_adjust(left=.035, right=.995, top=.925, bottom=.065, wspace=.04, hspace=.04)
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(.5, .065), ncol=len(handles), columnspacing=.7, handlelength=1, handletextpad=.3, fontsize=5.8)
+    cax = fig.add_axes([.42, .03, .4, .016])
+    bar = fig.colorbar(ScalarMappable(norm=age_norm, cmap=age_cmap), cax=cax, orientation="horizontal")
+    bar.set_ticks(AGE_TICKS, labels=[str(tick) for tick in AGE_TICKS])
+    bar.ax.minorticks_off()
+    bar.ax.tick_params(labelsize=5.8, length=2, width=.4, pad=1)
+    bar.outline.set_linewidth(.3)
+    fig.text(.405, .038, "Age: days from the perimeter date to the scene", ha="right", va="center", fontsize=6)
     save(fig, out, "fig04")
     return [row["tile_id"] for row in rows]
 
@@ -752,8 +845,8 @@ def write_numbers(frame, args, out, examples, cems_examples, cems_offsets, all_r
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--index", default="data/v2/index.csv")
-    parser.add_argument("--masks-root", default="data/v2")
+    parser.add_argument("--index", default="data/v4/index.csv")
+    parser.add_argument("--masks-root", default="data/v4")
     parser.add_argument("--images-root", default="data/v1")
     parser.add_argument("--cems-root", default="data/cems")
     parser.add_argument("--validation", default="validation")
@@ -784,7 +877,7 @@ def main():
         print("All done. Send fig07.pdf and spectra_numbers.md.")
         return
     figure_map(frame, out)
-    examples = figure_examples(frame, args.images_root, args.masks_root, out, args.example_tiles)
+    examples = figure_examples(frame, args.images_root, args.masks_root, out, args.example_tiles, args.config)
     figure_composition(frame, out)
     figure_classes(frame, out)
     figure_spectra(frame, args.images_root, args.masks_root, out)
