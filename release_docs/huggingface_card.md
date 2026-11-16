@@ -1,5 +1,6 @@
 ---
 license: cc-by-4.0
+viewer: false
 pretty_name: burn2scar
 task_categories:
 - image-segmentation
