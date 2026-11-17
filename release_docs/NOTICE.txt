@@ -1,19 +1,9 @@
-burn2scar
-Copyright 2026 Parampuneet Kaur Thind
-Licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
-Dataset: https://doi.org/10.5281/zenodo.24221783
-Mirror: https://huggingface.co/datasets/neet1797/burn2scar
-Full terms for each part: see LICENSE.txt.
-
-Contains modified Copernicus Sentinel data 2020-2026.
-Contains modified Copernicus Service information 2018-2026.
-
 Burn labels adapted from the European Forest Fire Information System (EFFIS),
 Copernicus Emergency Management Service, © European Union, 1995-2026, licensed
-under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Changes:
-perimeters rasterised to a 10 m grid, split into fresh, old and older burn
-classes by date, merged with cloud, cloud shadow and water classes, and turned
-into days-since-fire rasters (*_age.tif).
-
-Cloud and cloud shadow classes predicted with OmniCloudMask (MIT-licensed
-software): https://github.com/DPIRD-DMA/OmniCloudMask
+under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/legalcode.en).
+EFFIS data: https://forest-fire.emergency.copernicus.eu/applications/data-and-services
+EFFIS data licence: https://forest-fire.emergency.copernicus.eu/about-effis/data-license
+Changes: perimeters rasterised to a 10 m grid, split into fresh, old and older
+burn classes by date, and merged with cloud, cloud shadow and water classes.
+The two EFFIS exports are included unchanged. This work is not endorsed by
+the European Commission or EFFIS.
