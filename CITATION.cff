@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this code, please cite it as below. If you use the data, please cite the data set too."
 title: "burn2scar: code that builds the burn2scar data set"
-version: "4.0"
+version: "4.1"
 license: Apache-2.0
 repository-code: "https://github.com/paramkaur10/burn2scar_dataset_creation"
 keywords:
@@ -20,6 +20,9 @@ authors:
   - family-names: Del Prete
     given-names: Roberto
     affiliation: "European Space Agency, ESRIN"
+  - family-names: D'Aulerio
+    given-names: Paola
+    affiliation: "European Space Agency, ESRIN"
   - family-names: Ricolfi
     given-names: Silvia
     affiliation: "European Space Agency, ESRIN; Sapienza University of Rome"
@@ -32,8 +35,8 @@ authors:
 references:
   - type: dataset
     title: "burn2scar: a Sentinel-2 burn-scar segmentation data set"
-    version: "3.0"
-    doi: 10.5281/zenodo.23986827
+    version: "4.1"
+    doi: 10.5281/zenodo.24375951
     authors:
       - family-names: Thind
         given-names: Parampuneet Kaur
@@ -41,6 +44,8 @@ references:
         given-names: Enrico
       - family-names: Del Prete
         given-names: Roberto
+      - family-names: D'Aulerio
+        given-names: Paola
       - family-names: Ricolfi
         given-names: Silvia
       - family-names: Meoni

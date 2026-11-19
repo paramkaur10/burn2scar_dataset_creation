@@ -11,8 +11,8 @@ Design, after Olofsson et al. (2014) and Stehman and Foody (2019):
     give the fire away. Up to three dates are shown in time order with their dates only: no caption says
     which date is the fire, and the mask and the EFFIS perimeter are never shown.
   - Two reviewers answer every point independently, each in their own random order. Their agreement is
-    reported; where they disagree, a third person adjudicates, and the final label is the agreed or the
-    adjudicated answer.
+    reported. A third person adjudicates the points where they disagree and the answers the dNBR contradicts
+    (review_adjudicate.py); her answer is the final label wherever she gave one, and the agreed answer elsewhere.
   - The score step gives the full error matrix with area-weighted overall, user's and producer's accuracy,
     with bootstrap intervals that respect the strata, besides the per-class agreement and the groups.
 
@@ -32,14 +32,19 @@ Steps:
      python tools/review_points.py serve --out review2 --reviewer silvia --port 8766
      On the laptop: ssh -L 8765:localhost:8765 you@server, then open http://localhost:8765
 
-  5. Adjudicate the disagreements (a third person, or the two together).
+  5. Adjudicate the disagreements and the answers the dNBR contradicts (a third person), on a page served here
+     or, after review_dnbr.py, as a folder that opens in any browser:
      python tools/review_points.py serve --out review2 --reviewer judge --disagreements param silvia --port 8767
+     python tools/review_adjudicate.py --out review2 --reviewers param silvia --judge judge
 
   6. Score, at any time; the final label needs both reviewers and the judge.
      python tools/review_points.py score --out review2 --reviewers param silvia --judge judge
 
-  7. Files for the release.
+  7. Files for the release, with the answer columns named by role (interpreter1, interpreter2, adjudicator).
      python tools/review_points.py export --out review2 --reviewers param silvia --judge judge
+
+  8. The overall accuracy under the two scoring rules that bound it.
+     python tools/review_bounds.py --out review2 --reviewers param silvia --judge judge
 """
 import argparse
 import csv
@@ -647,7 +652,8 @@ def kappa(a, b):
 
 
 def final_labels(points, out, reviewers, judge):
-    """One answer per first showing: the agreed answer, else the judge's, else none."""
+    """One answer per first showing: the judge's where she answered (the disagreements, and the answers the dNBR
+    contradicts, from review_adjudicate.py), else the agreed answer, else none."""
     tables = {name: latest_answers(out / f"answers_{name}.csv") for name in reviewers}
     judged = latest_answers(out / f"answers_{judge}.csv") if judge else {}
     final = {}
@@ -655,10 +661,10 @@ def final_labels(points, out, reviewers, judge):
         given = [tables[name].get(pid) for name in reviewers]
         if any(g is None for g in given):
             continue
-        if len(set(given)) == 1:
-            final[pid] = given[0]
-        elif pid in judged:
+        if pid in judged:
             final[pid] = judged[pid]
+        elif len(set(given)) == 1:
+            final[pid] = given[0]
     return final
 
 
@@ -833,22 +839,34 @@ def run_score(args):
 
 
 def run_export(args):
-    """reviewed_points.csv and review_strata.csv in <out>/release: every point, each reviewer's answer, the final label."""
+    """reviewed_points.csv and review_strata.csv in <out>/release: every point, each reviewer's answer, the final label.
+
+    The answer columns are named by role, not by reviewer: answer_interpreter1, answer_interpreter2 (in the order of
+    --reviewers), answer_adjudicator (--judge) and answer_final."""
     out = Path(args.out)
     points = pd.read_csv(out / "points.csv", low_memory=False)
     shown = pd.read_csv(out / "chips_shown.csv") if (out / "chips_shown.csv").exists() else None
     table = points.copy()
-    for name in args.reviewers + ([args.judge] if args.judge else []):
-        table[f"answer_{name}"] = table["point_id"].map(latest_answers(out / f"answers_{name}.csv"))
+    roles = {name: f"interpreter{number}" for number, name in enumerate(args.reviewers, 1)}
+    if args.judge:
+        roles[args.judge] = "adjudicator"
+    for name, role in roles.items():
+        table[f"answer_{role}"] = table["point_id"].map(latest_answers(out / f"answers_{name}.csv"))
     final = final_labels(points, out, args.reviewers, args.judge)
     table["answer_final"] = table["point_id"].map(final)
     if shown is not None:
         table = table.merge(shown, on="point_id", how="left")
+    dnbr_path = out / "review_dnbr_points.csv"
+    if dnbr_path.exists():   # the dNBR at each point, on its scene and on the fire's first scene (review_dnbr.py)
+        dnbr = pd.read_csv(dnbr_path, usecols=lambda c: c in {"point_id", "dnbr", "dnbr_fresh"}).drop_duplicates("point_id")
+        table = table.merge(dnbr.rename(columns={"dnbr_fresh": "dnbr_first_scene"}), on="point_id", how="left")
+    if args.judge:
+        table["adjudicated"] = table["answer_adjudicator"].notna()
     first_showing = table[table["repeat_of"] < 0].set_index("source_row")["point_id"]
     table["repeat_of"] = [first_showing.get(source, "") if source >= 0 else "" for source in table["repeat_of"]]
     columns = ["point_id", "repeat_of", "tile_id", "fire_id", "scene_time", "country", "window", "fire_year", "fire_date", "age_days",
                "area_ha", "land_cover", "stratum", "mask_value", "row", "col", "lon", "lat", "edge_m", "dates_shown", "earliest_date",
-               "prefire_shown"] + [c for c in table.columns if c.startswith("answer_")]
+               "prefire_shown", "dnbr", "dnbr_first_scene", "adjudicated"] + [c for c in table.columns if c.startswith("answer_")]
     table = table[[c for c in columns if c in table.columns]]
     target = out / "release"
     target.mkdir(exist_ok=True)

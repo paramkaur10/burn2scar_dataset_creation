@@ -6,7 +6,8 @@ final. A token with only the deposit:write scope can't publish, so create it tha
 
   python tools/make_release.py plan
   python tools/make_release.py draft --creator "Family, Given"
-  python tools/make_release.py newversion                 # version 4.0: a new version of the published record
+  python tools/make_release.py newversion --version 4.1   # a new version of the published record, with a reserved DOI
+  python tools/make_release.py newversion --version 4.1 --creator "Family, Given" --affiliation "..." --after "Family, Given"
   python tools/make_release.py upload --only ages
   python tools/make_release.py upload --remove old_file.csv
   python tools/make_release.py upload --only masks
@@ -25,7 +26,7 @@ rebuilt each time and only uploaded if they changed, replacing the old file in t
 Tiles with no split are left out. The token comes from ZENODO_TOKEN or ~/.zenodo_token.
 
 newversion makes a draft of the next version of the record in zenodo.json (the published one) and keeps the old
-details as zenodo_<id>.json. The image zips are unchanged since version 1.0; if the new draft does not hold the earlier
+details as zenodo_<id>.json. --creator adds a creator to the new version, after the one named by --after. The image zips are unchanged since version 1.0; if the new draft does not hold the earlier
 files, use "Import files" on its page, and the upload then skips every zip that is already there.
 """
 import argparse
@@ -78,7 +79,8 @@ def description(frame):
             f"for {frame['fire_id'].nunique():,} EFFIS fires in {names}, {first} to {last}: {len(frame):,} tiles. "
             "Mask classes: clear, fresh burn, old burn, older burn, cloud, cloud shadow, water, no data. "
             "Beside each mask, a days-since-fire raster (ages.zip). burn_evidence.csv gives every fire's dNBR burn evidence, "
-            "and reviewed_points.csv the two-reviewer review of random points. "
+            "reviewed_points.csv a review of 700 random points by two interpreters and an adjudicator, and sample.zip "
+            "200 tiles for a first look. "
             "Unzip all files into one folder. index.csv lists every tile. "
             f"Contains modified Copernicus Sentinel data {first}-{last}. Contains modified Copernicus Service information {first}-{last}. "
             f"Burn labels adapted from EFFIS, Copernicus Emergency Management Service, (c) European Union, 1995-{last}, CC BY 4.0.")
@@ -298,7 +300,7 @@ def newversion(args):
     if not path.exists():
         raise SystemExit(f"No {path}: the details of the published record are needed to make a new version of it.")
     state = json.loads(path.read_text())
-    if state.get("version_of"):
+    if state.get("version_of") and not Zenodo(state["base"], state["id"]).get().get("submitted"):
         say(f"There is already a new-version draft: {state['base']}/uploads/{state['id']}")
         return
     frame, _ = load_index(args.index)
@@ -312,6 +314,13 @@ def newversion(args):
     api.depo, api.bucket = draft_reply["id"], draft_reply.get("links", {}).get("bucket")
     metadata = {k: v for k, v in draft_reply.get("metadata", {}).items() if k not in ("doi", "prereserve_doi")}
     metadata.update(version=args.version, publication_date=datetime.now(timezone.utc).date().isoformat(), description=description(frame))
+    creators = metadata.setdefault("creators", [])
+    names = [person.get("name") for person in creators]
+    if args.creator and args.creator not in names:
+        person = {"name": args.creator, **({"affiliation": args.affiliation} if args.affiliation else {}),
+                  **({"orcid": args.orcid} if args.orcid else {})}
+        creators.insert(names.index(args.after) + 1 if args.after in names else len(creators), person)
+        say(f"Creators: {'; '.join(person.get('name') for person in creators)}")
     answer = api.set_metadata(metadata)
     if answer.status_code >= 400:
         say(f"Zenodo didn't take the version number, date and description (HTTP {answer.status_code}); set them on the draft page.\n{answer.text[:400]}")
@@ -324,6 +333,7 @@ def newversion(args):
     path.write_text(json.dumps(new_state, indent=2))
     held = api.files()
     say(f"New-version draft: {api.base}/uploads/{api.depo}")
+    say(f"Reserved DOI: {new_state['doi'] or 'none yet, use the button on the draft page'}. It only starts working when you publish.")
     say(f"It holds {len(held)} files of the earlier version."
         + ("" if held else " Use 'Import files' on the draft page to bring them over, then run status."))
     say("Nothing is public until you press Publish on that page.")
@@ -443,7 +453,8 @@ def main():
     parser.add_argument("--creator", help='as "Family, Given"')
     parser.add_argument("--affiliation", default="")
     parser.add_argument("--orcid", default="")
-    parser.add_argument("--version", default="4.0")
+    parser.add_argument("--version", default="4.1")
+    parser.add_argument("--after", default="", help='newversion: put --creator after this creator, as "Family, Given"')
     parser.add_argument("--new", action="store_true", help="make another draft even though one exists")
     parser.add_argument("--only", choices=["images", "masks", "ages", "index"])
     parser.add_argument("--remove", nargs="+", help="files to take out of the draft, such as the first review's files")

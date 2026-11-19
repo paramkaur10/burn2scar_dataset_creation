@@ -1,7 +1,7 @@
 # burn2scar: a Sentinel-2 burn-scar segmentation data set
 
-**Version 4.0** · DOI [10.5281/zenodo.24221783](https://doi.org/10.5281/zenodo.24221783) · version 3.0: [10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827)  
-Authors: Parampuneet Kaur Thind, Enrico Cadau, Roberto Del Prete, Silvia Ricolfi, Gabriele Meoni, Andrea Taramelli  
+**Version 4.1** · DOI [10.5281/zenodo.24375951](https://doi.org/10.5281/zenodo.24375951) · version 4.0: [10.5281/zenodo.24221783](https://doi.org/10.5281/zenodo.24221783) · version 3.0: [10.5281/zenodo.23986827](https://doi.org/10.5281/zenodo.23986827)  
+Authors: Parampuneet Kaur Thind, Enrico Cadau, Roberto Del Prete, Paola D'Aulerio, Silvia Ricolfi, Gabriele Meoni, Andrea Taramelli  
 Licence: CC BY 4.0 for the authors' contributions. Third-party data keep their own terms; see `LICENSE.txt`.  
 Code: [github.com/paramkaur10/burn2scar_dataset_creation](https://github.com/paramkaur10/burn2scar_dataset_creation) · Mirror: [huggingface.co/datasets/neet1797/burn2scar](https://huggingface.co/datasets/neet1797/burn2scar)
 
@@ -10,8 +10,8 @@ in Italy, Spain, France south of 46° N and Greece, from 2020 to 2026. Each tile
 256 × 256 pixels (2.56 km across), a mask with seven classes plus no data (clear, fresh burn, old burn, older burn,
 water, cloud and cloud shadow) and, new in 4.0, a raster of the days since the fire. Most fires have two tiles of the
 same place: one scene 5 to 60 days after the fire, and one 120 to 300 days after. Every fire carries a measure of
-whether its burn shows in the imagery. A review of 700 random points by two people is being completed and will be
-added in version 4.1.
+whether its burn shows in the imagery, and, new in 4.1, a review of 700 random points by two interpreters and an
+adjudicator measures the labels against the imagery.
 
 | Country | Fires | Two scenes | One scene | Tiles | Smallest fire (ha) | Median fire size (ha) |
 |---|---:|---:|---:|---:|---:|---:|
@@ -34,7 +34,10 @@ Fires by year: 2020 1,721; 2021 2,074; 2022 2,264; 2023 1,998; 2024 1,831; 2025 
 | `burn_evidence.csv` | New: the dNBR burn evidence of every fire, on its fresh-window tile |
 | `burn_evidence_old_window.csv` | New: the same test on the old-window tiles, months after the fire |
 | `effis_export_2026-08-04.zip` | The EFFIS export the fires were selected from, as downloaded, with its own readme |
-| `effis_perimeters_2018-2026.zip` | New: the EFFIS export from 2018 that supplies the label history, as downloaded |
+| `effis_perimeters_2018-2026.zip` | The EFFIS export from 2018 that supplies the label history, as downloaded |
+| `reviewed_points.csv` | New in 4.1: the 700 reviewed points and the 35 shown twice, with place, stratum, every answer, the dNBR at the point and the final label |
+| `review_strata.csv` | New in 4.1: the area of each review stratum, to weight the points |
+| `sample.zip` | New in 4.1: 200 tiles with their masks, age rasters and index rows, for a first look without the full download |
 | `README.md`, `LICENSE.txt`, `NOTICE.txt` | This file, the terms for each part, and the notices to keep when redistributing |
 
 Unzip every zip into the same folder. That gives
@@ -205,11 +208,29 @@ does; it says nothing about burn outside the perimeter.
 
 `fire_dnbr_flag` in the index lets you keep the 10,660 fires with a clear signal, or the 11,947 with at least a weak one.
 
-### Review of random points by two people
+### Review of random points (`reviewed_points.csv`)
 
-700 random points, drawn from every mask class, are being judged from the imagery by two people independently, with
-disagreements settled by a third. The points, every answer and the area-weighted accuracies will be added in version 4.1
-(`reviewed_points.csv`, `review_strata.csv`). The review published with version 3.0, by one person, is withdrawn.
+700 random points, drawn from every mask class and weighted by the area of their stratum, were judged from the
+imagery alone by two interpreters independently, without the mask, the perimeter or the fire date. The question was
+whether the place had burned at any time up to the scene date. A third person settled the 211 points where the two
+answers differed and the 52 where the dNBR contradicted a shared answer; her answer is the final label there.
+
+- The two interpreters give answers of the same class at 73.6 % of the points (Cohen's kappa 0.59).
+- The final labels confirm 89.7 % of the fresh_burn area, 57.0 % of old_burn, 30.6 % of older_burn and 76.2 % of
+  clear.
+- Overall accuracy 71.9 % (95 % interval 66.4 to 77.6). Most of the rest is clear land in which the reviewers saw a
+  scar already present on the earliest image shown: a burn from before 2018, one EFFIS did not map, or bare ground
+  that looks like a scar. Not counting those scars as errors gives 86.9 % (83.8 to 89.5).
+
+Columns: `point_id`; `repeat_of`, the point that a repeated showing repeats; the tile and fire (`tile_id`, `fire_id`,
+`scene_time`, `country`, `window`, `fire_year`, `fire_date`, `age_days`, `area_ha`, `land_cover`); `stratum` and
+`mask_value`; the place (`row` and `col` in the tile, `lon`, `lat`, and `edge_m`, the distance to the burn edge);
+what was shown (`dates_shown`, `earliest_date`, `prefire_shown`); the dNBR at the point, on its scene (`dnbr`) and
+on the fire's first scene (`dnbr_first_scene`); `adjudicated`; and the answers `answer_interpreter1`,
+`answer_interpreter2`, `answer_adjudicator` and `answer_final`: burned; burned_before (burned, with the scar
+already on the earliest image shown); not_burned; water; cloud; shadow; cant_tell. `review_strata.csv` gives the
+pixels of each stratum, its share of the data set and its map class. The review published with version 3.0, by one
+person, is withdrawn.
 
 ### Against Copernicus EMS
 
@@ -224,7 +245,9 @@ area at F1 88.6 % (85.5 to 93.2). EMS maps large events, so this says little abo
   before the scene; often the scar no longer shows.
 - **The labels are weakest for small fires, at burn edges and in autumn and spring fires.** Use `fire_dnbr_flag` to keep
   the fires the imagery confirms.
-- **Burns that EFFIS didn't map are labelled clear**, and an EFFIS perimeter can include small unburned patches.
+- **clear means that no EFFIS perimeter since 2018 covers the pixel**, not that the land never burned: the review saw a
+  scar in 23.8 % of the clear area, most of it already on the earliest image. An EFFIS perimeter can include small
+  unburned patches.
   EFFIS does not separate wildfires from prescribed or agricultural burns; `agricultural` and `winter_fire` flag the
   fires most exposed to that.
 
@@ -243,25 +266,27 @@ area at F1 88.6 % (85.5 to 93.2). EMS maps large events, so this says little abo
 - **3.0**: burn from every EFFIS perimeter of the 2020 to 2026 export, and the older_burn class (15,482 masks changed);
   winter water checked; `water_checked`, `product_id` and `processing_baseline` in the index. Version 2 was an internal
   step.
-- **4.0** (this record): label history from 2018 (9,109 masks changed, almost all from clear to older_burn); age
+- **4.0**: label history from 2018 (9,109 masks changed, almost all from clear to older_burn); age
   rasters; burn evidence for every fire; the one-person review of 3.0 withdrawn, and a two-reviewer review of 700 points to follow in 4.1; new index
   columns `age_path`, `burn_age_median`, `winter_fire`, `agricultural`, `modis_mapped`, `dnbr_flag`, `dnbr_in_median`,
   `dnbr_contrast` and `fire_dnbr_flag`. Images are unchanged.
+- **4.1** (this record): the review of 700 random points (`reviewed_points.csv`, `review_strata.csv`) and a
+  200-tile sample (`sample.zip`). Images, masks, age rasters and index are unchanged from 4.0.
 
 ## Citation
 
-Thind, P. K., Cadau, E., Del Prete, R., Ricolfi, S., Meoni, G., and Taramelli, A.: burn2scar: a Sentinel-2
-burn-scar segmentation data set, version 4.0, Zenodo [data set], https://doi.org/10.5281/zenodo.24221783, 2026.
+Thind, P. K., Cadau, E., Del Prete, R., D'Aulerio, P., Ricolfi, S., Meoni, G., and Taramelli, A.: burn2scar: a Sentinel-2
+burn-scar segmentation data set, version 4.1, Zenodo [data set], https://doi.org/10.5281/zenodo.24375951, 2026.
 
 ```bibtex
 @dataset{thind2026burn2scar,
   author    = {Thind, Parampuneet Kaur and Cadau, Enrico and Del Prete, Roberto and
-               Ricolfi, Silvia and Meoni, Gabriele and Taramelli, Andrea},
+               D'Aulerio, Paola and Ricolfi, Silvia and Meoni, Gabriele and Taramelli, Andrea},
   title     = {burn2scar: a Sentinel-2 burn-scar segmentation data set},
   year      = {2026},
-  version   = {4.0},
+  version   = {4.1},
   publisher = {Zenodo},
-  doi       = {10.5281/zenodo.24221783}
+  doi       = {10.5281/zenodo.24375951}
 }
 ```
 
@@ -270,8 +295,8 @@ A data description paper is in preparation.
 ## Licence and attribution
 
 The authors' contributions are under CC BY 4.0. The Sentinel-2 imagery and the water class are under the Legal Notice
-on the use of Copernicus Sentinel Data and Service Information. The burn classes and age rasters are adapted from EFFIS,
-© European Union, 1995-2026, CC BY 4.0. Cloud and shadow come from OmniCloudMask, MIT-licensed software. `LICENSE.txt`
+on the use of Copernicus Sentinel Data and Service Information. The burn classes and age rasters are adapted from EFFIS
+(https://forest-fire.emergency.copernicus.eu/applications/data-and-services), © European Union, 1995-2026, CC BY 4.0. Cloud and shadow come from OmniCloudMask, MIT-licensed software. `LICENSE.txt`
 has the details. Keep these notices when you redistribute the data:
 
 ```

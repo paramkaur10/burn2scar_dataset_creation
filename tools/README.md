@@ -1,6 +1,7 @@
 # Tools: how the release and the paper's results were made
 
-These are the steps behind burn2scar 3.0 and its data paper, as they were run on our server. Run them in
+These are the steps behind burn2scar and its data paper, as they were run on our server: steps 1 to 14 made
+version 3.0, and step 15 takes it to versions 4.0 and 4.1, whose numbers the paper reports. Run them in
 order from the repo root. Everything is safe to stop and restart. Nothing
 here changes the published dataset: new files go under `data/`, `results/`, `review/` and `validation/`.
 
@@ -43,25 +44,8 @@ for the label review page.
 ssh -L 8882:localhost:8882 -L 8765:localhost:8765 you@your-server
 ```
 
-Open the `http://127.0.0.1:8882/lab?token=...` address shown in the `jupyter` window. Upload the zip with the
-file panel, open a terminal from the launcher, and run:
-
-```bash
-python -m zipfile -e burn2scar_v2_tools.zip .
-git status --short
-git checkout -b v2
-git apply --3way pipeline_label_fix.patch
-git status --short
-```
-
-Check the last `git status`: the changed files should now be listed with `M`. If `git apply` printed any `error:`
-line, it applied nothing, even if it also printed "Applied patch" lines. When a file has local changes, leave it out
-of the first command and apply it to the working copy alone, which keeps your edits:
-
-```bash
-git apply --3way --exclude=HF_DATASET_CARD.md pipeline_label_fix.patch
-git apply --include=HF_DATASET_CARD.md pipeline_label_fix.patch
-```
+Open the `http://127.0.0.1:8882/lab?token=...` address shown in the `jupyter` window and open a terminal from the
+launcher.
 
 Short commands can run in any Jupyter terminal. For long runs, type `tmux attach -t b2s:runs` in a Jupyter
 terminal first, so they keep going even if Jupyter restarts. Ctrl+b then d leaves the window running.
@@ -214,40 +198,8 @@ leaves comparisons of methods and datasets to review articles. It's there for th
 
 ## 7. Label review
 
-A person judges random pixels from the imagery alone, without seeing the masks. Pre-fire images make the
-judgement much easier, so fetch them for the sampled fires. Check the fetch first: `--verify` downloads 3
-images you already have and compares them with your files.
-
-```bash
-python tools/review_points.py sample --workers 8
-python tools/fetch_prefire.py --verify 3
-python tools/fetch_prefire.py --points review/points.csv --out data/prefire
-python tools/review_points.py chips --prefire-root data/prefire --workers 8
-python tools/review_points.py serve --reviewer param
-```
-
-The fetch costs about 1.08 PU per image, a few thousand PU in all. On your laptop run
-`ssh -L 8765:localhost:8765 you@your-server`, then open http://localhost:8765. Keys 1 to 6 answer, and
-Backspace goes back. Each answer saves at once.
-
-The sample is about 1,630 points in random order, about 2¼ hours at 5 seconds each. You can stop at any
-point and still get valid numbers, with wider intervals:
-
-| Points answered | Time | Points per burn class | Interval at 90% agreement |
-|---|---|---|---|
-| 500 | 40 minutes | about 90 | ±6 |
-| 1,000 | 1.4 hours | about 180 | ±4.3 |
-| 1,630 | 2.3 hours | 300 | ±3.4 |
-
-For the journal's uncertainty section, a second reviewer helps a lot. Each person uses `--part 1/2`
-or `--part 2/2`, and they both answer the first 100 points, which measures how often two people agree.
-
-```bash
-python tools/review_points.py score
-```
-
-Writes `review/review_summary.md`: answers by class, area-weighted precision, recall, F1 and IoU with
-95% intervals, confirmation rates by country, window and year, and reviewer consistency.
+The one-person review of version 3.0 is withdrawn. The review behind version 4.1, by two interpreters and an
+adjudicator, is in step 15.
 
 ## 8. Pre-fire images for every fire (optional)
 
@@ -272,12 +224,6 @@ first checks 20 tiles against the Sentinel Hub catalogue the pipeline read from,
 The full run adds the source products and their processing baselines to the index once every tile has a lookup.
 Where two satellites passed minutes apart, both passes are listed: the pipeline asked Sentinel Hub
 for 3 hours either side of each scene, with the most recent acquisition on top.
-
-To publish the label review with the data set:
-
-```bash
-python tools/review_points.py export --out review_final
-```
 
 ## 10. Record the environment
 
@@ -361,6 +307,111 @@ release when `BURN2SCAR_ROOT` points to it.
 `results/` stays on the server and out of git: the paper's tables come from it, and the model card carries the
 released model's scores.
 
+## 15. Versions 4.0 and 4.1
+
+Every number in the paper comes from these steps, on the v4 masks. The images are those of step 5.
+
+### Label history from 2018, and the age rasters
+
+`effis_extra` in `config.yaml` points at the EFFIS export from 1 January 2018 (`effis/`), which adds the perimeters
+before the build export. The masks are patched with every perimeter since 2018, the index is rebuilt from them as in
+step 3, and the age raster goes beside every mask:
+
+```bash
+python tools/burn_labels.py patch --config config.yaml --masks-dir data/v3 --out-dir data/v4 --workers 16
+python tools/make_age.py --config config.yaml --masks-dir data/v4 --out-dir data/v4 --workers 16 \
+    --index data/v4/index.csv --carry-from data/v3/index.csv
+```
+
+### Burn evidence (no Copernicus quota: Sentinel-2 L2A from the Earth Search archive on AWS)
+
+```bash
+python tools/burn_evidence.py --index data/v4/index.csv --masks-root data/v4 --out validation/dnbr --workers 16
+python tools/burn_evidence.py --index data/v4/index.csv --masks-root data/v4 --out validation/dnbr --summarize --write-index
+python tools/burn_evidence.py --index data/v4/index.csv --masks-root data/v4 --out validation/dnbr_old --window old --workers 16
+python tools/dnbr_analysis.py --index data/v4/index.csv --fresh validation/dnbr --old validation/dnbr_old \
+    --out validation/dnbr_analysis.md
+```
+
+### Models
+
+```bash
+bash tools/final_v4.sh
+python tools/summarize_results.py --results results_v4 --index data/v4/index.csv
+python tools/extra_scores.py --results results_v4 --index data/v4/index.csv --out results_v4/extra_scores.md
+python tools/extra_inference.py --results results_v4 --index data/v4/index.csv --images-root data/v1 --masks-root data/v4 \
+    --out results_v4/extra_inference.md
+```
+
+### The point review
+
+700 points: 500 drawn on the v3 masks, and a supplement of 200 on the v4 masks for older_burn and more fresh_burn.
+Two interpreters answer every point on their own, from the pictures alone. The dNBR under each point then flags the
+answers it contradicts, and an adjudicator settles those and every disagreement. `review_points.py` explains the
+design.
+
+```bash
+python tools/review_points.py sample --index data/v3/index.csv --masks-root data/v3 --out review2
+python tools/review_points.py sample --supplement --index data/v4/index.csv --masks-root data/v4 --out review2 --seed 2027 \
+    --counts older=50 fresh_early=40 fresh_mid=40 fresh_late=40 cloud=15 shadow=15
+python tools/fetch_prefire.py --index data/v4/index.csv --points review2/points.csv --out data/prefire
+python tools/review_points.py chips --out review2 --index data/v4/index.csv --images-root data/v1 --prefire-root data/prefire
+
+# Each interpreter, on a page served here or in a folder that opens in any browser
+python tools/review_points.py serve --out review2 --reviewer param --port 8765
+python tools/review_offline.py --out review2 --reviewer silvia
+
+# The dNBR under every point, and the adjudication
+python tools/burn_evidence.py --index data/v4/index.csv --masks-root data/v4 --out validation/dnbr_review \
+    --tiles-from review2/points.csv --save-dnbr --workers 24
+python tools/review_dnbr.py --out review2 --dnbr validation/dnbr_review/dnbr --reviewers param silvia --index data/v4/index.csv
+python tools/review_adjudicate.py --out review2 --reviewers param silvia --judge judge
+
+# Scores, the two rules that bound the overall accuracy, and the release files
+python tools/review_points.py score --out review2 --reviewers param silvia --judge judge
+python tools/review_bounds.py --out review2 --reviewers param silvia --judge judge
+python tools/review_points.py export --out review2 --reviewers param silvia --judge judge
+```
+
+`export` writes `review2/release/reviewed_points.csv` and `review_strata.csv`, with the answers named by role:
+`answer_interpreter1`, `answer_interpreter2`, `answer_adjudicator` and `answer_final`.
+
+### Figures and numbers of the paper
+
+```bash
+python tools/compare_cems.py --index data/v4/index.csv --masks-root data/v4 --out validation
+python tools/burn_evidence.py --index data/v4/index.csv --masks-root data/v4 --out validation/dnbr_cems \
+    --tiles-from validation/cems_tiles.csv --save-dnbr --workers 16
+python tools/make_label_figures.py --out paper/figures --workers 16
+python tools/make_paper_figures.py --out paper/figures
+python tools/make_extra_figures.py --out paper/figures
+python tools/paper_checks.py --index data/v4/index.csv --config config.yaml --out validation/paper_checks.md
+```
+
+`make_label_figures.py` draws the figures of the label-quality section and writes the numbers its text quotes to
+`paper/figures/label_numbers.md`.
+
+### Release 4.1
+
+A new version of the Zenodo record, with a reserved DOI, then the sample built with that DOI, then the new files. The
+draft needs the files of 4.0 too: if `newversion` says it holds none, press "Import files" on the draft page first.
+
+```bash
+python tools/make_release.py newversion --version 4.1 --creator "D'Aulerio, Paola" \
+    --affiliation "European Space Agency, ESRIN" --after "Del Prete, Roberto"
+python tools/make_sample.py --version 4.1 --doi <reserved DOI>
+python tools/make_release.py upload --files release_docs/README.md release_docs/NOTICE.txt \
+    review2/release/reviewed_points.csv review2/release/review_strata.csv release/sample.zip
+python tools/make_release.py status
+```
+
+Publish on the Zenodo page, then bring the Hugging Face card up to date (the masks and index are those of 4.0):
+
+```bash
+python tools/upload_hf.py plan --version 4.1 --tag v4.0
+python tools/upload_hf.py run --version 4.1 --tag v4.0
+```
+
 ## What each new mask class means
 
 | Value | Class | Meaning |
@@ -401,3 +452,18 @@ the burnt-class metrics, since the ground under them can't be seen.
 | `make_gallery.py` | Random test tiles with mask and prediction |
 | `make_readme_figure.py` | The picture at the top of the README |
 | `make_examples.py` | One test fire, both scenes and masks, into `examples/` |
+| `make_age.py` | Days-since-fire raster beside every mask, and three index flags |
+| `burn_evidence.py` | dNBR burn evidence of every fire, from Sentinel-2 L2A on Earth Search |
+| `dnbr_analysis.py` | The burn evidence by threshold, size, country, season and time since the fire |
+| `review_offline.py` | The point review as a folder that opens in any browser |
+| `review_dnbr.py` | dNBR under every reviewed point, and the answers it contradicts |
+| `review_adjudicate.py` | The adjudication, as a folder that opens in any browser |
+| `review_bounds.py` | Overall accuracy of the review under the two rules that bound it |
+| `make_label_figures.py` | Figures and numbers of the paper's label-quality section |
+| `make_extra_figures.py` | Burn-evidence and prediction figures |
+| `extra_scores.py`, `extra_inference.py` | Scores from the saved confusion matrices; the older_burn and off-centre tests |
+| `age_confusion.py` | Image or calendar: the age accuracy against a month rule |
+| `compare_agency.py` | EFFIS and the labels against a regional agency's fire perimeters |
+| `paper_checks.py` | Numbers the paper needs from the index and the EFFIS export |
+| `make_sample.py` | The 200-tile `sample.zip` of the release |
+| `final_v4.sh`, `phase2.sh` | The final model runs on the v4 masks, and the steps queued after them |
