@@ -14,6 +14,12 @@ labelled clear). The L2A comes from the public Earth Search catalogue on AWS: no
   python tools/burn_evidence.py --index data/v4/index.csv --masks-root data/v4 --out validation/dnbr --workers 24
   python tools/burn_evidence.py --index data/v4/index.csv --masks-root data/v4 --out validation/dnbr --summarize --write-index
 
+With --reference anniversary the pre-fire image is the same season a year before the scene (within --anniversary-days)
+and still before the fire, so on old-window tiles the dNBR measures whether the scar persists without the seasonal shift:
+  python tools/burn_evidence.py --window old --reference anniversary --out validation/dnbr_old_anniversary --workers 16
+The ring's NBR before and after (nbr_pre_ring, nbr_post_ring) beside the inside's shows whether a scar was already on the
+pre-fire image: referee_checks.py none splits the fires flagged none that way.
+
 Flag per tile (Key and Benson put unburned at -0.1 to 0.1):
   burn     median dNBR inside >= 0.10, and >= 0.10 above the ring's median (or no usable ring)
   weak     not burn, but the inside median >= 0.10 or the contrast with the ring >= 0.05
@@ -59,7 +65,7 @@ BURN, CONTRAST, WEAK_CONTRAST = 0.10, 0.10, 0.05
 RING_M = (100, 300)
 COLUMNS = ["tile_id", "fire_id", "flag", "note", "pre_date", "pre_valid", "pre_pb", "post_pb", "n_in", "n_ring",
            "n_clear", "dnbr_in_median", "dnbr_in_p25", "dnbr_ring_median", "contrast", "in_010", "in_027",
-           "ring_010", "clear_010", "nbr_pre_in", "nbr_post_in"]
+           "ring_010", "clear_010", "nbr_pre_in", "nbr_post_in", "nbr_pre_ring", "nbr_post_ring", "reference"]
 FLAGS = ["burn", "weak", "none", "no_data", "error"]   # best first: a fire's flag is the best of its tiles
 _W = {}
 
@@ -229,7 +235,16 @@ def evidence(row):
             return {**out, "flag": "no_data", "note": "post-fire L2A empty over the fire"}
 
         fire = pd.Timestamp(row["fire_date"])
-        pre_items = stac_search(footprint, iso(fire - pd.Timedelta(days=args.pre_days)), iso(fire - pd.Timedelta(seconds=1)))
+        if args.reference == "anniversary":
+            # The same season a year before the scene, and still before the fire: phenology then cancels out of the dNBR.
+            centre = scene - pd.Timedelta(days=365)
+            start, end = centre - pd.Timedelta(days=args.anniversary_days), min(centre + pd.Timedelta(days=args.anniversary_days),
+                                                                               fire - pd.Timedelta(seconds=1))
+            if end <= start:
+                return {**out, "flag": "no_data", "note": "no anniversary window before the fire"}
+        else:
+            start, end = fire - pd.Timedelta(days=args.pre_days), fire - pd.Timedelta(seconds=1)
+        pre_items = stac_search(footprint, iso(start), iso(end))
         best = prefire(pre_items, grid, area, args) if pre_items else None
         if best is None:
             return {**out, "flag": "no_data", "note": "no pre-fire L2A"}
@@ -260,7 +275,10 @@ def evidence(row):
                 "dnbr_ring_median": ring_median, "contrast": contrast,
                 "in_010": int((d_in >= 0.10).sum()), "in_027": int((d_in >= 0.27).sum()),
                 "ring_010": int((d_ring >= 0.10).sum()), "clear_010": int((d_clear >= 0.10).sum()),
-                "nbr_pre_in": median(pre[inside & ok]), "nbr_post_in": median(post[inside & ok])}
+                "nbr_pre_in": median(pre[inside & ok]), "nbr_post_in": median(post[inside & ok]),
+                "nbr_pre_ring": median(pre[ring & ok]) if d_ring.size >= args.min_pixels else np.nan,
+                "nbr_post_ring": median(post[ring & ok]) if d_ring.size >= args.min_pixels else np.nan,
+                "reference": args.reference}
     except Exception as error:   # one bad tile must not stop the run; it is retried next time
         return {**out, "flag": "error", "note": f"{type(error).__name__}: {error}"[:300]}
 
@@ -268,11 +286,13 @@ def evidence(row):
 def run(todo, perimeters, args, rows_path):
     jobs = todo[["tile_id", "fire_id", "mask_path", "scene_time", "fire_date"]].to_dict("records")
     start, counts = time.time(), {}
+    # A file begun by an older version keeps its own columns, so appended rows always match its header.
+    columns = list(pd.read_csv(rows_path, nrows=0).columns) if rows_path.exists() else COLUMNS
     with ProcessPoolExecutor(args.workers, initializer=_init, initargs=(perimeters, args)) as pool:
         futures = [pool.submit(evidence, job) for job in jobs]
         for i, future in enumerate(as_completed(futures), 1):
             row = future.result()
-            pd.DataFrame([row]).reindex(columns=COLUMNS).to_csv(rows_path, mode="a", header=not rows_path.exists(),
+            pd.DataFrame([row]).reindex(columns=columns).to_csv(rows_path, mode="a", header=not rows_path.exists(),
                                                                  index=False)
             counts[row["flag"]] = counts.get(row["flag"], 0) + 1
             if i % 100 == 0 or i == len(jobs):
@@ -370,6 +390,9 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="a random sample of this many tiles, for a trial")
     parser.add_argument("--tiles-from", default="", help="any CSV with a tile_id column, e.g. review2/points.csv; overrides --window")
     parser.add_argument("--pre-days", type=int, default=90)
+    parser.add_argument("--reference", default="prefire", choices=["prefire", "anniversary"],
+                        help="pre-fire image: the most recent before the fire, or the same season a year before the scene")
+    parser.add_argument("--anniversary-days", type=int, default=30, help="half-width of the anniversary window, in days")
     parser.add_argument("--min-valid", type=float, default=0.8)
     parser.add_argument("--max-dates", type=int, default=6)
     parser.add_argument("--max-scene-cloud", type=float, default=80, help="skip pre-fire dates whose granules are all cloudier")

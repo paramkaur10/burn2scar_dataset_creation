@@ -1,6 +1,6 @@
 # burn2scar U-Net (ResNet-34)
 
-A baseline model trained on [burn2scar](https://doi.org/10.5281/zenodo.23986827) version 3.0. It takes one post-fire
+A baseline model trained on [burn2scar](https://doi.org/10.5281/zenodo.24397115), on the masks of version 4.0, which version 5.0 keeps. It takes one post-fire
 Sentinel-2 Level-1C image and gives every pixel one of six classes: clear, fresh_burn (burned up to 90 days
 before the image), old_burn (90 to 365 days before), cloud, cloud shadow and water.
 
@@ -66,7 +66,7 @@ Per-class IoU of this model, each class against all others:
 
 ## Training
 
-- Data: burn2scar version 3.0, column `split` of index.csv: 16,183 training and 5,243 validation tiles. The split keeps overlapping fires apart in 0.5 degree blocks.
+- Data: burn2scar, masks of version 4.0 (unchanged in 5.0), column `split` of index.csv: 16,183 training and 5,243 validation tiles. The split keeps overlapping fires apart in 0.5 degree blocks.
 - Input scaling: reflectance (value / 10,000) clipped to 0 to 1.5, then normalised per band with the mean and standard deviation of 1,000 training tiles (both in config.json).
 - The encoder started from torchvision's ImageNet ResNet-34 weights (BSD-3-Clause), as distributed with segmentation-models-pytorch. The first layer takes 13 bands.
 - Random 192 x 192 crops, flips and 90 degree turns. AdamW, learning rate 3e-4, weight decay 1e-4, batch 32, one warm-up epoch then cosine decay, at most 60 epochs, stopped after 15 without gain. Loss: cross entropy weighted by the inverse square root of class frequency, plus Dice. The kept epoch is the best by validation F1 of fresh and old burn together.
@@ -88,4 +88,4 @@ Code that built the data and trained the model: https://github.com/paramkaur10/b
 
 ## Citation
 
-Thind, P. K., Cadau, E., Del Prete, R., Ricolfi, S., Meoni, G., and Taramelli, A.: burn2scar: a Sentinel-2 burn-scar segmentation data set, version 3.0, Zenodo [data set], https://doi.org/10.5281/zenodo.23986827, 2026.
+Thind, P. K., Cadau, E., Del Prete, R., D'Aulerio, P., Ricolfi, S., Meoni, G., and Taramelli, A.: burn2scar: a Sentinel-2 burn-scar segmentation data set, version 5.0, Zenodo [data set], https://doi.org/10.5281/zenodo.24397115, 2026.

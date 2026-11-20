@@ -47,6 +47,7 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Patch, Rectangle
 TOOLS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS))
 
+PARTIAL_YEAR_END = "3 August"   # the last fire date in the export of 4 August 2026
 CM = 1 / 2.54
 WIDTH = 12 * CM  # The width Copernicus sets for a two-column figure.
 INK, INK2, RULE = "#0b0b0b", "#52514e", "#d9d7d0"
@@ -246,33 +247,42 @@ def figure_workflow(out):
 
 
 def figure_windows(out):
-    fig, ax = plt.subplots(figsize=(WIDTH, 4.3 * CM))
+    fig, ax = plt.subplots(figsize=(WIDTH, 5.6 * CM))
     limit = 430
-    ax.set(xlim=(0, limit), ylim=(0, 3.6))
-    rows = {"Scene search": 2.55, "Class of a fire,\nby its age at\nthe scene date": .95}
+    ax.set(xlim=(0, limit), ylim=(0, 5.1))
+    rows = {"Training tiles:\nscene search": 4.05, "Evaluation\nadditions": 2.55, "Class of a fire,\nby its age at\nthe scene date": .95}
     for label, y in rows.items():
         ax.text(-8, y + .3, label, ha="right", va="center", fontsize=6.5, color=INK2)
 
-    def band(x0, x1, y, colour, text, ink="white"):
-        ax.add_patch(Rectangle((x0, y), x1 - x0, .6, facecolor=colour, edgecolor="white", linewidth=.8))
-        ax.text((x0 + x1) / 2, y + .3, text, ha="center", va="center", fontsize=6.5, color=ink)
+    def band(x0, x1, y, colour, text, ink="white", edge="white", hatch=None):
+        ax.add_patch(Rectangle((x0, y), x1 - x0, .6, facecolor=colour, edgecolor=edge, linewidth=.8, hatch=hatch))
+        if text:
+            ax.text((x0 + x1) / 2, y + .3, text, ha="center", va="center", fontsize=6.5, color=ink)
 
-    band(5, 60, 2.55, CLASS_COLOUR["fresh"], "fresh")
-    band(120, 300, 2.55, CLASS_COLOUR["old"], "old")
-    ax.text(5, 3.25, "day 5", ha="center", va="bottom", fontsize=6, color=INK2)
+    band(5, 60, 4.05, CLASS_COLOUR["fresh"], "fresh")
+    band(120, 300, 4.05, CLASS_COLOUR["old"], "old")
+    ax.text(5, 4.75, "day 5", ha="center", va="bottom", fontsize=6, color=INK2)
+    plt.rcParams["hatch.linewidth"] = .4
+    band(0, 5, 2.55, "#eaf2fb", "", edge=BLUE)
+    ax.text(0, 3.2, "first look, days 0\u20135", ha="left", va="bottom", fontsize=6, color=INK2,
+            bbox=dict(facecolor="white", edgecolor="none", pad=.6))
+    band(61, 90, 2.55, "#eaf2fb", "", edge=BLUE)
+    band(91, 120, 2.55, "#eaf2fb", "", edge=BLUE)
+    ax.text(90.5, 2.25, "boundary, days 61\u2013120", ha="center", va="top", fontsize=6, color=INK2,
+            bbox=dict(facecolor="white", edgecolor="none", pad=.6))
     band(0, 90, .95, CLASS_COLOUR["fresh"], "fresh_burn")
     band(90, 365, .95, CLASS_COLOUR["old"], "old_burn")
     band(365, limit, .95, CLASS_COLOUR["older"], "older_burn", ink=INK)
     for x in (60, 90, 120):
-        ax.plot([x, x], [.55, 3.15], color="#8a8984", linewidth=.4, linestyle=(0, (2, 2)), zorder=0)
-    ax.annotate("", xy=(60, 1.95), xytext=(90, 1.95), arrowprops=dict(arrowstyle="<->", linewidth=.5, color=INK2, shrinkA=0, shrinkB=0))
-    ax.annotate("", xy=(90, 1.95), xytext=(120, 1.95), arrowprops=dict(arrowstyle="<->", linewidth=.5, color=INK2, shrinkA=0, shrinkB=0))
-    ax.text(90, 2.16, "30-day margins", ha="center", va="center", fontsize=6, color=INK2, bbox=dict(facecolor="white", edgecolor="none", pad=.6))
+        ax.plot([x, x], [.55, 4.65], color="#8a8984", linewidth=.4, linestyle=(0, (2, 2)), zorder=0)
+    ax.annotate("", xy=(60, 3.5), xytext=(90, 3.5), arrowprops=dict(arrowstyle="<->", linewidth=.5, color=INK2, shrinkA=0, shrinkB=0))
+    ax.annotate("", xy=(90, 3.5), xytext=(120, 3.5), arrowprops=dict(arrowstyle="<->", linewidth=.5, color=INK2, shrinkA=0, shrinkB=0))
+    ax.text(90, 3.71, "30-day margins", ha="center", va="center", fontsize=6, color=INK2, bbox=dict(facecolor="white", edgecolor="none", pad=.6))
     ax.set_xticks([0, 60, 90, 120, 300, 365])
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xlabel("Days from the EFFIS fire date")
-    fig.subplots_adjust(left=.17, right=.99, top=.97, bottom=.24)
+    fig.subplots_adjust(left=.17, right=.99, top=.98, bottom=.19)
     save(fig, out, "fig02")
 
 
@@ -433,6 +443,9 @@ def figure_composition(frame, out):
     year.set_ylabel("Tiles")
     number_ticks(year.yaxis)
     year.set_xticks(table.index)
+    last = int(table.index.max())
+    year.set_xticklabels([f"{y}*" if y == last else str(y) for y in table.index])   # a partial year
+    year.text(.99, .97, f"* to {PARTIAL_YEAR_END}", transform=year.transAxes, ha="right", va="top", fontsize=6, color=INK2)
     year.tick_params(axis="x", length=0)
     year.legend(ncol=2, loc="upper left", columnspacing=.8, handlelength=1, handletextpad=.35, borderaxespad=0)
     year.set_ylim(0, bottom.max() * 1.32)

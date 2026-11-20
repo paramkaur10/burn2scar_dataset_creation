@@ -70,7 +70,7 @@ THIS_SCENE, FIRST_SCENE = AQUA, CLASS_COLOUR["fresh"]
 DNBR_THIS, DNBR_FIRST = "dNBR ≥ 0.10, this scene", "dNBR ≥ 0.10, the fire's first scene"
 SOURCE_COLOUR = {DNBR_THIS: THIS_SCENE, DNBR_FIRST: FIRST_SCENE, **SERIES_COLOUR}
 BURN_STRATA, CLEAR_STRATA = ["fresh_early", "fresh_mid", "fresh_late", "old", "older"], ["clear_near", "clear_far"]
-SAID = {"burned": "burned", "burned_before": "burned, already on the earliest date", "not_burned": "not burned",
+SAID = {"burned": "burned", "burned_before": "burned, already on the earliest image", "not_burned": "not burned",
         "water": "water", "cloud": "cloud", "shadow": "shadow", "cant_tell": "can't tell"}
 CEMS_LINE, KEEP_CLASSES = "#3fd0ea", [0, 2, 3, 6, 7]   # the classes compare_cems.py compares: not cloud, shadow, no data
 CEMS_MAPS = {"label": "burn2scar fresh_burn", "dnbr10": "dNBR ≥ 0.10", "dnbr27": "dNBR ≥ 0.27",
@@ -355,7 +355,7 @@ def pick_examples(first, answers, names, dnbr, shown, seed):
 def example_title(letter, point, answers, names, dnbr, judged):
     pid = point["point_id"]
     given = [answers[n].get(pid) for n in names]
-    short = {**SAID, "burned_before": "burned, scar on the first date"}
+    short = {**SAID, "burned_before": "burned, scar already on the pre-fire image"}
     said = (f"both interpreters: {short.get(given[0], given[0])}" if given[0] == given[1]
             else "interpreters: " + " | ".join(short.get(g, g) for g in given))
     if pid in judged:

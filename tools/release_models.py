@@ -33,11 +33,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from summarize_results import burnt_from_matrix, fresh_from_matrix, pm  # noqa: E402
 
-DATASET_DOI = "10.5281/zenodo.23986827"
+DATASET_DOI = "10.5281/zenodo.24397115"
 DATASET_REPO = "neet1797/burn2scar"
 CODE_URL = "https://github.com/paramkaur10/burn2scar_dataset_creation"
-CITATION = ("Thind, P. K., Cadau, E., Del Prete, R., Ricolfi, S., Meoni, G., and Taramelli, A.: burn2scar: a Sentinel-2 "
-            "burn-scar segmentation data set, version 3.0, Zenodo [data set], https://doi.org/10.5281/zenodo.23986827, 2026.")
+CITATION = ("Thind, P. K., Cadau, E., Del Prete, R., D'Aulerio, P., Ricolfi, S., Meoni, G., and Taramelli, A.: burn2scar: a "
+            "Sentinel-2 burn-scar segmentation data set, version 5.0, Zenodo [data set], https://doi.org/10.5281/zenodo.24397115, 2026.")
 BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12"]
 CLASSES = ["clear", "fresh_burn", "old_burn", "cloud", "shadow", "water"]
 MASK_VALUES = [0, 2, 3, 4, 5, 6]  # mask value of each model class, as in train_baseline.TASKS["multiclass"]
@@ -117,7 +117,7 @@ tags:
 
 # burn2scar {info['title']}
 
-A baseline model trained on [burn2scar](https://doi.org/{DATASET_DOI}) version 3.0. It takes one post-fire
+A baseline model trained on [burn2scar](https://doi.org/{DATASET_DOI}), on the masks of version 4.0, which version 5.0 keeps. It takes one post-fire
 Sentinel-2 Level-1C image and gives every pixel one of six classes: clear, fresh_burn (burned up to 90 days
 before the image), old_burn (90 to 365 days before), cloud, cloud shadow and water.
 
@@ -166,7 +166,7 @@ Per-class IoU of this model, each class against all others:
 
 ## Training
 
-- Data: burn2scar version 3.0, column `split` of index.csv: {tiles['train']:,} training and {tiles['val']:,} validation tiles. The split keeps overlapping fires apart in 0.5 degree blocks.
+- Data: burn2scar, masks of version 4.0 (unchanged in 5.0), column `split` of index.csv: {tiles['train']:,} training and {tiles['val']:,} validation tiles. The split keeps overlapping fires apart in 0.5 degree blocks.
 - Input scaling: reflectance (value / 10,000) clipped to 0 to 1.5, then normalised per band with the mean and standard deviation of 1,000 training tiles (both in config.json).
 - {info['encoder_credit']} The first layer takes 13 bands.
 - Random 192 x 192 crops, flips and 90 degree turns. {info['training']}, one warm-up epoch then cosine decay, at most 60 epochs, stopped after 15 without gain. Loss: cross entropy weighted by the inverse square root of class frequency, plus Dice. The kept epoch is the best by validation F1 of fresh and old burn together.
@@ -213,7 +213,7 @@ def run_build(args):
     config = {"architecture": info["architecture"], "encoder": info["encoder"], "in_channels": len(BANDS),
               "classes": CLASSES, "mask_values": MASK_VALUES, "bands": BANDS, "scale": 10000, "clip": [0.0, 1.5],
               "mean": stats["mean"], "std": stats["std"], "tile_size": 256, "nodata_value": 255,
-              "training": {"data": f"burn2scar 3.0, https://doi.org/{DATASET_DOI}", "split_column": args.split,
+              "training": {"data": f"burn2scar 5.0 (masks of 4.0), https://doi.org/{DATASET_DOI}", "split_column": args.split,
                            "seed": chosen["run"]["seed"], "run": chosen["dir"].name}}
     (folder / "config.json").write_text(json.dumps(config, indent=1))
     metrics = {"model_seed": chosen["run"]["seed"], "test_tiles": chosen["run"]["tiles"]["test"],
@@ -243,7 +243,7 @@ def run_upload(args):
     print(f"Logged in as {api.whoami()['name']}")
     api.create_repo(repo_id=args.repo, repo_type="model", exist_ok=True)
     api.upload_folder(folder_path=str(folder), repo_id=args.repo, repo_type="model", allow_patterns=FILES,
-                      commit_message=f"burn2scar {RELEASE[args.spec]['title']} baseline, data set version 3.0")
+                      commit_message=f"burn2scar {RELEASE[args.spec]['title']} baseline, trained on the masks of version 4.0, data set version 5.0")
     print(f"Uploaded to https://huggingface.co/{args.repo}. Now run check.")
 
 

@@ -412,6 +412,45 @@ python tools/upload_hf.py plan --version 4.1 --tag v4.0
 python tools/upload_hf.py run --version 4.1 --tag v4.0
 ```
 
+## 16. Version 5.0
+
+The evaluation additions, the referee's checks, the independent review and the comparison with Sardinia's fire
+perimeters, then the release. The steps ran on one GPU server; `overnight_v5.sh` chains the long ones.
+
+```bash
+python tools/check_v5.py                                   # packages, inputs, effis_extra, trained runs
+python tools/acquire_additions.py plan                     # 2,492 targets; then run, about 6,500 Sentinel Hub requests
+python tools/acquire_additions.py run
+python tools/finish_additions.py --workers 16 --zip        # labels, ages, additions_index.csv, additions.zip
+bash tools/overnight_v5.sh                                 # referee_checks.py parts, score_models.py, the blind review page
+python tools/review_blind.py score --reviewer <name>       # after the independent interpreter's answers are in review2/
+python tools/agency_sardinia.py                            # CFVA perimeters 2020-2025 against EFFIS and the labels
+python tools/score_models.py agency --models unet_r34 segformer_b2 --seeds 0 1 2 3 4
+python tools/make_v5_figures.py                            # fig_additions.pdf
+```
+
+Release: make a new version of the data record and of the code record on the Zenodo pages, reserving a DOI for each
+("Get a DOI now!"), and import the files of 4.1 into the data draft. Then:
+
+```bash
+python tools/release_v5.py prepare                         # data/release/v5/: index, new tables, README, licence, notice
+python tools/release_v5.py adopt --id <data draft id>      # make_release.py now works on that draft
+python tools/make_sample.py --version 5.0 --doi <data DOI>
+python tools/make_release.py upload --index data/release/v5/index.csv --only index
+python tools/make_release.py upload --index data/release/v5/index.csv --files data/additions/additions.zip \
+    data/release/v5/burn_evidence_old_same_season.csv data/release/v5/reviewed_points_independent.csv \
+    data/release/v5/README.md data/release/v5/NOTICE.txt release/sample.zip
+python tools/make_release.py status --index data/release/v5/index.csv
+python tools/upload_hf.py plan --version 5.0 --tag v4.1 --release-index data/release/index.csv
+python tools/upload_hf.py run --version 5.0 --tag v4.1 --release-index data/release/index.csv
+python tools/release_models.py build --spec unet_r34 --results results_v4
+python tools/release_models.py upload --spec unet_r34 --repo neet1797/burn2scar-unet-r34
+python tools/release_models.py export --spec unet_r34 --repo neet1797/burn2scar-unet-r34
+```
+
+The code record takes the archive of the `v5.0` tag, uploaded by hand to its draft; the tag is pushed without a
+GitHub release, so the Zenodo integration does not make a second record.
+
 ## What each new mask class means
 
 | Value | Class | Meaning |
@@ -467,3 +506,12 @@ the burnt-class metrics, since the ground under them can't be seen.
 | `paper_checks.py` | Numbers the paper needs from the index and the EFFIS export |
 | `make_sample.py` | The 200-tile `sample.zip` of the release |
 | `final_v4.sh`, `phase2.sh` | The final model runs on the v4 masks, and the steps queued after them |
+| `check_v5.py` | Checks the server before the version 5.0 runs |
+| `acquire_additions.py`, `finish_additions.py`, `fetch_images.py` | The evaluation additions: targets and download; labels, ages, index and zip; image fetch from the Hugging Face copy |
+| `referee_checks.py` | The numbers the referee asked for: cloud, history, water, zeros, none flags, splits, managed burns, new index columns |
+| `score_models.py` | The baselines on the additions, against CEMS, at the reviewed points and on Sardinia's agency-only burn |
+| `review_blind.py`, `review_dates.py` | The independent date-blind review (pictures, page, score) and the review scored on dates |
+| `agency_sardinia.py` | Downloads Sardinia's CFVA perimeters and runs `compare_agency.py` on them |
+| `make_v5_figures.py` | The additions figure |
+| `overnight_v5.sh` | The long version 5.0 steps in one run |
+| `release_v5.py` | The files of release 5.0, and the link to its Zenodo draft |

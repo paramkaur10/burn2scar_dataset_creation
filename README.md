@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://doi.org/10.5281/zenodo.24375951"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.24375951.svg" alt="Dataset DOI 10.5281/zenodo.24375951"></a>
+  <a href="https://doi.org/10.5281/zenodo.24397115"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.24397115.svg" alt="Dataset DOI 10.5281/zenodo.24397115"></a>
   <a href="https://huggingface.co/datasets/neet1797/burn2scar"><img src="https://img.shields.io/badge/Hugging%20Face-dataset-f5a04a" alt="Dataset on Hugging Face"></a>
   <a href="https://huggingface.co/neet1797/burn2scar-unet-r34"><img src="https://img.shields.io/badge/Hugging%20Face-model-f5a04a" alt="Baseline model on Hugging Face"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/code-Apache%202.0-1d5fa0" alt="Code licence Apache 2.0"></a>
@@ -37,7 +37,8 @@ in the same mask, and beside each mask a raster gives the days since the fire.
 
 This repository holds the code that built the dataset, a baseline model, two notebooks to explore both, one example
 fire, and the tools behind the data paper's validation and figures. The data themselves are on
-[Zenodo](https://doi.org/10.5281/zenodo.24375951) (version 4.1).
+[Zenodo](https://doi.org/10.5281/zenodo.24397115) (version 5.0), and the code of each version is archived there too
+([v5.0](https://doi.org/10.5281/zenodo.24397266)).
 
 **Contents:** [Quickstart](#quickstart) · [The dataset](#the-dataset) · [Baseline model](#baseline-model) ·
 [Notebooks](#notebooks) · [Rebuild the dataset](#rebuild-the-dataset) · [Repository layout](#repository-layout) ·
@@ -69,7 +70,8 @@ jupyter lab notebooks/                     # explore the data, run the model
 | **Masks** | Seven classes and no data, uint8 GeoTIFF with a colour table |
 | **Ages** | Days from the fire to the scene for every pixel, uint16 GeoTIFF beside each mask |
 | **Splits** | Spatial (0.5° blocks), by fire year, and each country held out in turn |
-| **Size, licence** | About 31 GB; CC BY 4.0, with the Copernicus and EFFIS notices |
+| **Evaluation tiles** | 2,458 more, new in 5.0: burn-free land, the edges of fires above 2,000 ha, scenes 61 to 120 days after a fire, and first looks 0 to 5 days after it |
+| **Size, licence** | About 34 GB; CC BY 4.0, with the Copernicus and EFFIS notices |
 
 ### Classes
 
@@ -90,9 +92,9 @@ so it includes bare soil, rock and sparse scrub, and scars older than 2018 or th
 
 ### Download
 
-**Everything** is on [Zenodo](https://doi.org/10.5281/zenodo.24375951): images zipped by country and fire year, `masks.zip`,
-`ages.zip`, `index.csv`, the burn evidence of every fire, the reviewed points, the two EFFIS exports the labels came
-from, and a README. Unzip all of it into one folder. `sample.zip` there holds 200 tiles in the same layout, for a first
+**Everything** is on [Zenodo](https://doi.org/10.5281/zenodo.24397115): images zipped by country and fire year, `masks.zip`,
+`ages.zip`, `index.csv`, `additions.zip` with the evaluation tiles, the burn evidence of every fire, both point
+reviews, the two EFFIS exports the labels came from, and a README. Unzip all of it into one folder. `sample.zip` there holds 200 tiles in the same layout, for a first
 look without the full download.
 
 **A few tiles** at a time from [Hugging Face](https://huggingface.co/datasets/neet1797/burn2scar):
@@ -115,7 +117,7 @@ fire's tile, so a random split puts the same ground in training and test.
 
 ### Label quality
 
-The burn labels are EFFIS's, and they were checked three ways:
+The burn labels are EFFIS's, and they were checked five ways:
 
 - **Burn evidence for every fire.** The dNBR between a pre-fire Sentinel-2 image and the tile's own scene shows a
   clear burn signal inside the perimeter for 78.5 % of the 13,571 fires that could be assessed, from 67.7 % of fires
@@ -127,14 +129,20 @@ The burn labels are EFFIS's, and they were checked three ways:
   within months, so old_burn and older_burn record when EFFIS mapped a fire, not what still shows. The reviewers saw
   a scar in 23.8 % of the area labelled clear, most of it already on the earliest image shown, so the overall
   accuracy is 71.9 % with those scars counted as errors and 86.9 % without. Every point and answer is in the release.
+- **An independent, date-blind review** of 351 of the points, by an interpreter who did not build the dataset and
+  saw every date without being told which was under review, confirms 92.5 % of the fresh_burn area and 50.0 % of
+  old_burn, and agrees with the final labels at 87.1 % of the points.
+- **The field-surveyed perimeters of Sardinia's forest corps** (2020 to 2025): where both map a fire, fresh_burn
+  agrees with them at an F1 of 91.1 %. EFFIS holds about one in nine of the regional fires of 5 ha or more, with half
+  of their burnt area, so many small burns are labelled clear.
 
 The dataset's README on Zenodo gives the full numbers, their intervals and the known limits.
 
 ## Baseline model
 
 [`models/burn2scar-unet-r34`](models/burn2scar-unet-r34) is a U-Net with a ResNet-34 encoder trained on the main
-split of version 3.0. It takes the 13 Level-1C bands and gives each pixel one of six classes: clear, fresh_burn, old_burn, cloud,
-cloud shadow and water. On the test set it finds fresh burn with an F1 of 80.8 ± 1.2 % over five training seeds;
+split, on the masks of version 4.0, which version 5.0 keeps. It takes the 13 Level-1C bands and gives each pixel one of six classes: clear, fresh_burn, old_burn, cloud,
+cloud shadow and water. On the test set it finds fresh burn with an F1 of 81.2 ± 0.9 % over five training seeds;
 the released weights are the median seed. It is a baseline, there to show the labels can be learned.
 
 ```bash
@@ -170,7 +178,7 @@ python run_extraction.py --config config.yaml
 `config.yaml` holds the settings of the release run. It is resumable: fires already uploaded are skipped. It needs
 at least two Sentinel Hub requests per tile, about 54,000 for the release, so check your quota first. The index,
 splits, label updates, validation, review, baselines and figures come after, with the tools in `tools/`, in the
-order [`tools/README.md`](tools/README.md) gives, from step 15 on for version 4.0 and 4.1.
+order [`tools/README.md`](tools/README.md) gives, from step 15 on for versions 4.0, 4.1 and 5.0.
 
 ## Repository layout
 
@@ -206,14 +214,14 @@ If you use burn2scar, please cite the dataset:
   author    = {Thind, Parampuneet Kaur and Cadau, Enrico and Del Prete, Roberto and
                D'Aulerio, Paola and Ricolfi, Silvia and Meoni, Gabriele and Taramelli, Andrea},
   title     = {burn2scar: a {Sentinel-2} burn-scar segmentation data set},
-  version   = {4.1},
+  version   = {5.0},
   publisher = {Zenodo},
   year      = {2026},
-  doi       = {10.5281/zenodo.24375951}
+  doi       = {10.5281/zenodo.24397115}
 }
 ```
 
-A data paper describing burn2scar is in preparation. For the code, use "Cite this repository" on this page
+A data paper describing burn2scar is under review. For the code, use "Cite this repository" on this page
 (`CITATION.cff`).
 
 ## Licence and attribution

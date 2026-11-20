@@ -62,14 +62,29 @@ def naive(values):
     return dates.dt.tz_localize(None) if dates.dt.tz is not None else dates
 
 
+def parse_dates(values, dayfirst):
+    """Dates from a column: datetimes as they are; ISO strings (2022-07-03) always year-month-day, because pandas with
+    dayfirst=True silently reads 2022-07-03 as 7 March; other strings day first or month first as asked."""
+    if pd.api.types.is_datetime64_any_dtype(values):
+        dates = pd.to_datetime(values)
+        return dates.dt.tz_localize(None) if dates.dt.tz is not None else dates
+    raw = values.astype(str).str.strip()
+    iso = raw.str.match(r"^\d{4}-\d{2}-\d{2}")
+    dates = pd.Series(pd.NaT, index=raw.index, dtype="datetime64[ns]")
+    if iso.any():
+        dates[iso] = pd.to_datetime(raw[iso].str[:10], errors="coerce", format="%Y-%m-%d")
+    if (~iso).any():
+        dates[~iso] = pd.to_datetime(raw[~iso], errors="coerce", dayfirst=dayfirst, format="mixed")
+    return dates
+
+
 def read_agency(paths, date_col, dayfirst):
     parts = [gpd.read_file(p) for p in paths]
     frame = pd.concat([p.to_crs(EQUAL_AREA) for p in parts], ignore_index=True)
     frame = gpd.GeoDataFrame(frame, geometry="geometry", crs=EQUAL_AREA)
-    raw = frame[date_col].astype(str)
-    dates = pd.to_datetime(raw, errors="coerce", dayfirst=dayfirst, format="mixed")
+    dates = parse_dates(frame[date_col], dayfirst)
     if dates.isna().mean() > .5:
-        dates = pd.to_datetime(raw, errors="coerce", dayfirst=not dayfirst, format="mixed")
+        dates = parse_dates(frame[date_col], not dayfirst)
     frame["agency_date"] = naive(dates)
     frame["geometry"] = frame.geometry.make_valid()
     frame = frame[frame["agency_date"].notna() & ~frame.geometry.is_empty].reset_index(drop=True)
@@ -91,6 +106,47 @@ def match(agency, effis, days_before, days_after):
     keep = [agency.geometry.iloc[a].intersection(effis.geometry.iloc[e]).area > 100 for a, e in zip(pairs["a"], pairs["e"])]
     pairs = pairs[np.array(keep, bool)] if len(pairs) else pairs
     return pd.DataFrame({"agency_id": pairs["a"].to_numpy(), "fire_id": effis["fire_id"].to_numpy()[pairs["e"]]})
+
+
+def overlap_days(agency, effis):
+    """Every overlapping (agency_id, fire_id) pair, whatever the dates, with the EFFIS date minus the agency date."""
+    left, right = effis.sindex.query(agency.geometry.values, predicate="intersects")
+    pairs = pd.DataFrame({"a": left, "e": right})
+    keep = [agency.geometry.iloc[a].intersection(effis.geometry.iloc[e]).area > 100 for a, e in zip(pairs["a"], pairs["e"])]
+    pairs = pairs[np.array(keep, bool)] if len(pairs) else pairs
+    days = ((effis["fire_date"].to_numpy()[pairs["e"]] - agency["agency_date"].to_numpy()[pairs["a"]]) / np.timedelta64(1, "D"))
+    return pd.DataFrame({"agency_id": agency["agency_id"].to_numpy()[pairs["a"]], "fire_id": effis["fire_id"].to_numpy()[pairs["e"]],
+                         "days": days})
+
+
+def window_check(agency, effis, min_ha, days_before, days_after):
+    """How the detection depends on the date window: the share of agency fires of at least min_ha, and of their area,
+    that an overlapping EFFIS perimeter matches under wider windows, and the date differences of overlapping pairs."""
+    every = overlap_days(agency, effis)
+    big = agency[agency["agency_ha"] >= min_ha]
+    mid = big[(big["agency_ha"] >= 100) & (big["agency_ha"] < 500)]
+    rows = []
+    for name, before, after in [(f"{days_before} days before to {days_after} after (used)", days_before, days_after),
+                                ("60 days either side", 60, 60), ("180 days either side", 180, 180),
+                                ("any date", 10 ** 6, 10 ** 6)]:
+        hit = set(every.loc[(every["days"] >= -before) & (every["days"] <= after), "agency_id"])
+        found = big["agency_id"].isin(hit)
+        rows.append({"EFFIS date window around the agency date": name,
+                     f"Fires of {min_ha:g} ha or more matched %": wilson(int(found.sum()), len(big)),
+                     "Their area in matched fires %": f"{100 * big.loc[found, 'agency_ha'].sum() / max(big['agency_ha'].sum(), 1e-9):.1f}",
+                     "Fires of 100-500 ha matched %": wilson(int(mid["agency_id"].isin(hit).sum()), len(mid))})
+    near = every[every["days"].abs() <= 365]
+    first = near.loc[near.groupby("agency_id")["days"].apply(lambda d: d.abs().idxmin())] if len(near) else near
+    lines = ["## 1b. The date window", "",
+             "Agency fires counted as mapped by EFFIS under wider windows (any overlap of more than 100 m2).", "",
+             md(pd.DataFrame(rows)), ""]
+    if len(first):
+        q = first["days"].quantile([.1, .25, .5, .75, .9])
+        lines += [f"Agency fires with an overlapping EFFIS perimeter dated within a year: {len(first):,}. EFFIS date minus agency "
+                  f"date, nearest perimeter: median {q[.5]:+.0f} days, quartiles {q[.25]:+.0f} to {q[.75]:+.0f}, 10th-90th "
+                  f"percentiles {q[.1]:+.0f} to {q[.9]:+.0f}; within the window used: "
+                  f"{100 * first['days'].between(-days_before, days_after).mean():.1f} %.", ""]
+    return lines
 
 
 def events(pairs):
@@ -218,15 +274,23 @@ def main():
 
     lines = [f"# EFFIS and burn2scar against {args.name} perimeters", "",
              f"- Agency perimeters {first.date()} to {last.date()}: {len(agency):,}; at least {args.min_ha:g} ha: {int((agency['agency_ha'] >= args.min_ha).sum()):,}",
-             f"- EFFIS perimeters in the area: {len(effis):,}. Match: overlapping, EFFIS dated {args.days_before} days before to "
-             f"{args.days_after} days after the agency date.", ""]
+             f"- EFFIS perimeters in the area: {len(effis):,}, {int(effis['fire_date'].between(first, last).sum()):,} of them dated "
+             f"{first.date()} to {last.date()}; at least {args.min_ha:g} ha by EFFIS's own area: "
+             f"{int((effis['fire_date'].between(first, last) & (effis.geometry.area / 1e4 >= args.min_ha)).sum()):,}. "
+             f"Match: overlapping, EFFIS dated {args.days_before} days before to {args.days_after} days after the agency date.", ""]
 
-    rows = [{"Size": s, "Agency fires": len(part), "Matched by EFFIS %": wilson(int(part["matched"].sum()), len(part))}
+    area_share = lambda part: f"{100 * part.loc[part['matched'], 'agency_ha'].sum() / max(part['agency_ha'].sum(), 1e-9):.1f}"
+    rows = [{"Size": s, "Agency fires": len(part), "Matched by EFFIS %": wilson(int(part["matched"].sum()), len(part)),
+             "Agency area, ha": f"{part['agency_ha'].sum():,.0f}", "Area in matched fires %": area_share(part)}
             for s, part in agency.groupby("size", observed=True)]
     eligible = agency[agency["agency_ha"] >= args.min_ha]
     rows.append({"Size": f"all, at least {args.min_ha:g} ha", "Agency fires": len(eligible),
-                 "Matched by EFFIS %": wilson(int(eligible["matched"].sum()), len(eligible))})
+                 "Matched by EFFIS %": wilson(int(eligible["matched"].sum()), len(eligible)),
+                 "Agency area, ha": f"{eligible['agency_ha'].sum():,.0f}", "Area in matched fires %": area_share(eligible)})
+    rows.append({"Size": "all", "Agency fires": len(agency), "Matched by EFFIS %": wilson(int(agency["matched"].sum()), len(agency)),
+                 "Agency area, ha": f"{agency['agency_ha'].sum():,.0f}", "Area in matched fires %": area_share(agency)})
     lines += ["## 1. Detection: agency fires that EFFIS mapped", "", md(pd.DataFrame(rows)), ""]
+    lines += window_check(agency, effis, args.min_ha, args.days_before, args.days_after)
 
     scored = event_scores(agency, effis, pairs)
     if len(scored):
